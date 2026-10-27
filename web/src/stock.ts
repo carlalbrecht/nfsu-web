@@ -46,7 +46,7 @@ start.addEventListener('click', async () => {
     const active = await startProcess({ module, pool: 24, poolStart: 8,
       cfg: { args: ['nfsu1', '/data/Speed.exe'], env: {
         NFSU1_SAVEDIR: '/save', NFSU2_RENDERER: 'webgpu', NFSU2_MOVIE_CODEC: 'vp6',
-        NFSU2_WIDTH: '800', NFSU2_HEIGHT: '600', TRACE_MAX: '20', NFSU2_KEY_LOG: '1',
+        NFSU2_WIDTH: '800', NFSU2_HEIGHT: '600', TRACE_MAX: '20',
       }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: 'nfsu1-stock-save' },
       onNote: log, onLog: (line, fd, tid) => log(`[${tid}${fd === 2 ? '!' : ''}] ${line}`),
     });
@@ -55,6 +55,7 @@ start.addEventListener('click', async () => {
     // Browser smoke tests can inspect the real renderer and host state.
     Object.assign(globalThis, { underground: {
       process: active, stats: () => renderer?.stats(), key: (code: string, down: boolean) => input?.key(code, down),
+      audio: () => audio?.status(), input: () => input?.status(),
     }});
     input = attachInput(active, canvas, { keyboardTarget: canvas, hideCursor: false });
     void attachAudio(active, { log }).then(handle => {

@@ -31,7 +31,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     common = "mem dispatch genexec heap watchdog win32 win32_ext com d3dcaps debug res fileio vsemu lifecycle dinput_pad dikeys keyboard dinput_kbd winsock module modheap enhance"
     sources = [Path(f"runtime/{name}.c") for name in common.split()]
-    sources += [Path(f"runtime/nfsu1/{name}.c") for name in ("entry", "stock", "win32")]
+    sources += [Path(f"runtime/nfsu1/{name}.c") for name in ("entry", "stock", "win32", "datetime")]
     sources += [Path("runtime/web/null_platform.c"), Path("runtime/web/sha256.c")]
     sources += sorted(Path("gen/all").glob("*.c"))
     flags = shlex.split(os.environ.get("OPT", "-O1"))

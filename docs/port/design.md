@@ -18,7 +18,9 @@ The generation script clears upstream address-specific hook and override lists a
 
 Host API compatibility is still an emulation layer, not a full Windows implementation. In particular, inherited COM methods include success stubs. No claim of complete API coverage follows from a successful boot.
 
-The stock resolution list remains enabled without the UG2 mode remapping. Correcting `D3DCAPS9` output from 336 to its actual 304 bytes is necessary: UG1 stores its resolution-availability table immediately afterward, and the old write cleared it.
+The stock resolution list remains enabled without the UG2 mode remapping or native-display scaling. The device honors the game's resolution, including its 800x600 menu to 640x480 default race transition; the browser scales the resulting image for presentation. Correcting `D3DCAPS9` output from 336 to its actual 304 bytes is necessary: UG1 stores its resolution-availability table immediately afterward, and the old write cleared it.
+
+`runtime/nfsu1/datetime.c` implements the English date/time formatting calls used by profile saving, including current-local-time selection, SYSTEMTIME validation, size queries and buffer bounds. It deliberately returns Windows errors for unsupported locales and picture strings. Contracts: [GetDateFormatA](https://learn.microsoft.com/windows/win32/api/datetimeapi/nf-datetimeapi-getdateformata) and [GetTimeFormatA](https://learn.microsoft.com/windows/win32/api/datetimeapi/nf-datetimeapi-gettimeformata).
 
 ## Cooperative scheduling
 

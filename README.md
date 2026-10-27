@@ -2,7 +2,7 @@
 
 An early port of the original PC **Need for Speed: Underground (2003)** to WebAssembly, based on [th0mk/nfsu2-web](https://github.com/th0mk/nfsu2-web). The first target is the stock game experience. Test-map access, surviving debug features, widescreen and multiplayer are later milestones.
 
-The current build translates a verified `Speed.exe` to C, compiles it to WASM, and runs it with the inherited Win32, Direct3D 9/WebGPU and DirectSound/Web Audio runtime. **This is a development port, not yet a validated playable release.** See [current validation and limitations](docs/port/status.md).
+The current build translates a verified `Speed.exe` to C, compiles it to WASM, and runs it with the inherited Win32, Direct3D 9/WebGPU and DirectSound/Web Audio runtime. It boots the original videos and menus, creates and reloads profiles, and runs a drivable Olympic Square circuit. **This is an early development port with limited gameplay validation.** See [current validation and limitations](docs/port/status.md).
 
 Bring your own game installation. The repository excludes the executable, game assets, translated game C, built WASM, saves and local research output. The original installation is served read-only; browser saves use a separate origin-private storage directory.
 
@@ -29,6 +29,8 @@ npm --prefix web ci --ignore-scripts
 ```
 
 Open `http://127.0.0.1:8080/` in Chrome and click **Start game**. Click the canvas to focus keyboard input. The server binds to loopback and supports the cross-origin-isolation headers required by shared WASM memory. `--no-build` reuses existing output; the normal command checks the generation stamp and rebuilds changed sources. Set `J=4` (the default) to bound compiler parallelism.
+
+The original controls apply: **Enter** advances menus and skips eligible startup videos, **arrow keys** navigate and drive, **Backspace** goes back in menus, and **Escape** pauses a race. Wait for each screen transition before confirming again. **Stop** terminates the game; saves remain in this browser's storage for this origin.
 
 For separate build steps:
 

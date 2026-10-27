@@ -1308,6 +1308,15 @@ static void res_pick(uint32_t gw, uint32_t gh, uint32_t *dw, uint32_t *dh){
     *dw = gw; *dh = gh;
     /* The cursor must be in the space the game BELIEVES in, not on the drawable. */
     { void metal_set_game_size(unsigned,unsigned); metal_set_game_size(gw, gh); }
+#ifdef NFSU1
+    /* The stock port honors the game's selected resolution, including the
+     * 800x600 menu -> 640x480 race transition. Canvas size is presentation. */
+    g_cur_row = tbl_row(gw, gh);
+    g_req_w = g_req_h = 0; g_aspfix = 1.f;
+    ws_set_mapping(1.f);
+    { void metal_set_ui_aspect(float, float); metal_set_ui_aspect(1.f, 1.f); }
+    return;
+#endif
     if (!rdone){ rdone = 1; const char *e = ENVC("NFSRES");
         if (e && *e){ unsigned a = 0, b = 0;
             if (sscanf(e, "%ux%u", &a, &b) == 2 && a >= 640 && b >= 480

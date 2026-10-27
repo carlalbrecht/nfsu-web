@@ -3,6 +3,8 @@
 #include "cpu.h"
 #include <string.h>
 
+int nfsu1_datetime(CPU *, const char *, uint32_t *);
+
 static uint8_t upper_1252(uint8_t ch) {
     if ((ch >= 'a' && ch <= 'z') || (ch >= 0xe0 && ch <= 0xf6) || (ch >= 0xf8 && ch <= 0xfe))
         return ch - 0x20;
@@ -28,5 +30,5 @@ int nfsu1_win32(CPU *c, const char *name, uint32_t *result) {
         *result = (uint32_t)((int)x - (int)y);
         return 1;
     }
-    return 0;
+    return nfsu1_datetime(c, name, result);
 }
