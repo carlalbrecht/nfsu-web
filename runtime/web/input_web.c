@@ -549,6 +549,9 @@ static void *input_main(void *unused){
  * Present (autotest.c) when it changed, under IM_TEXT_SEQ. */
 #define G_TXT 0x0083a7b0u
 void input_web_frame(void){
+#ifdef NFSU1
+    return; /* UG2's text-entry overlay is outside the stock input bridge. */
+#endif
     static uint32_t l_max, l_kind, l_len;
     static uint8_t l_txt[INPUT_TEXT_BYTES];
     uint32_t max = 0, kind = 0, len = 0;

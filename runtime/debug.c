@@ -93,6 +93,10 @@ static RecEnt g_rec[RECR];
 static uint32_t g_rec_n = 0, g_rec_esp0 = 0;
 void guest_hook(CPU *c, uint32_t ip){
     g_hook_hits++;
+#ifdef NFSU1
+    /* UG2's instruction sites and engine layouts do not apply to this game. */
+    return;
+#endif
     { int ws_hook(CPU *, uint32_t); if (ws_hook(c, ip)) return; }
     { int roam_hook(CPU *, uint32_t); if (roam_hook(c, ip)) return; }
     { int language_hook(CPU *, uint32_t); if (language_hook(c, ip)) return; }

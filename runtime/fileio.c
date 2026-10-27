@@ -1,6 +1,13 @@
 /* Guest file I/O -> POSIX.  Maps Windows paths to the game folder and
  * resolves them case-insensitively.                                    */
 #include "cpu.h"
+#ifdef NFSU1
+#define VIRTUAL_GAME_DIR "C:\\NFSU1"
+#define VIRTUAL_GAME_NAME "NFSU1"
+#else
+#define VIRTUAL_GAME_DIR "C:\\NFSU2"
+#define VIRTUAL_GAME_NAME "NFSU2"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,7 +79,7 @@ static void rel_of(const char *win, char *rel, size_t relsz){
     const char *p = win;
     if (p[0] && p[1]==':') p += 2;                       /* drive letter   */
     while (*p=='\\' || *p=='/') p++;
-    if (!strncasecmp(p,"NFSU2",5) && (p[5]=='\\'||p[5]=='/'||p[5]==0)){
+    if (!strncasecmp(p,VIRTUAL_GAME_NAME,5) && (p[5]=='\\'||p[5]=='/'||p[5]==0)){
         p += 5; while (*p=='\\'||*p=='/') p++;           /* virtual root   */
     }
     while (p[0]=='.' && (p[1]=='\\'||p[1]=='/')) p += 2;
@@ -638,7 +645,7 @@ int fileio_call(CPU *c, const char *n, uint32_t *out){
         int abs_ = (src[0] && src[1] == ':') || src[0] == '\\' || src[0] == '/';
         if (abs_ && src[0] != '\\' && src[0] != '/') snprintf(full, sizeof full, "%s", src);
         else if (abs_) snprintf(full, sizeof full, "C:%s", src);
-        else snprintf(full, sizeof full, "C:\\NFSU2\\%s", src);
+        else snprintf(full, sizeof full, VIRTUAL_GAME_DIR "\\%s", src);
         for (char *q = full; *q; q++) if (*q == '/') *q = '\\';
         uint32_t len = (uint32_t)strlen(full);
         if (!buf || nb < len + 1) r = len + 1;
@@ -656,7 +663,7 @@ int fileio_call(CPU *c, const char *n, uint32_t *out){
          * We return the virtual root; resolve() maps it to the game folder.
          * If it comes back empty the game cannot find its save/profile folder. */
         uint32_t pp=A(c,4);
-        if (pp){ mem_commit(pp, 260); snprintf((char*)(g_mem+pp), 260, "C:\\NFSU2"); }
+        if (pp){ mem_commit(pp, 260); snprintf((char*)(g_mem+pp), 260, VIRTUAL_GAME_DIR); }
         r=0; }
     else if (!strcmp(n,"CreateDirectoryA")){
         char real[1024]; resolve_w(GS(A(c,0)), real, sizeof real);

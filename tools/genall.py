@@ -3,6 +3,7 @@
 import sys, os, struct, collections, time, multiprocessing as mp
 sys.path.insert(0,'tools')
 import pefile
+JOBS = max(1, int(os.environ.get('J', '4')))
 from capstone import *
 from capstone.x86 import *
 from lift import Lifter, Unsupported, _lregs
@@ -93,7 +94,7 @@ def drop_table_targets(funcs, fixed, relref):
     # a table counts only if EVERY function that jumps through it switches: one
     # that dispatches instead still needs the targets as functions
     tabs = set(); left = set()
-    with mp.Pool(mp.cpu_count(), initializer=_init) as pool:
+    with mp.Pool(JOBS, initializer=_init) as pool:
         for sw, lf in pool.imap_unordered(_jt_tables, funcs, chunksize=64): tabs.update(sw); left.update(lf)
     tabs = {d: ents for d, ents in tabs if d not in left}
     slots = set()
@@ -201,22 +202,27 @@ if __name__=='__main__':
     for _p in _glob.glob(f"{OUT}/shard_*.c"):
         if int(os.path.basename(_p)[6:10]) >= NSHARD: os.remove(_p)
     if os.path.exists(f"{OUT}/stubs.c"): os.remove(f"{OUT}/stubs.c")
-    chunks=[(i, funcs[i::NSHARD]) for i in range(NSHARD)]
+    # Stable buckets keep existing functions in their shards as discovery
+    # gains more targets; one newly found callback need not rebuild every TU.
+    buckets=[[] for _ in range(NSHARD)]
+    for address in funcs:
+        buckets[((address >> 4) ^ address) % NSHARD].append(address)
+    chunks=list(enumerate(buckets))
     hk=os.environ.get('HOOKS',''); wt=os.environ.get('WATCH','')
     if OVERRIDES: print(f"  [override: {[hex(a) for a in sorted(OVERRIDES)]}]")
-    print(f"\nPhase 2: generating {NSHARD} shards on {mp.cpu_count()} cores..."
+    print(f"\nPhase 2: generating {NSHARD} shards on {JOBS} cores..."
           + (f"  [hooks: {hk}]" if hk else "")
           + ("  [COVERAGE measurement]" if os.environ.get('COVERAGE','')=='1' else "") + ("  [WATCHPOINT instrumentation]" if wt=='1' else ""))
     t1=time.time()
     inl = {}
     if INLINE_MAX or INLINE_LIST:
-        with mp.Pool(mp.cpu_count(), initializer=_init) as pool:
+        with mp.Pool(JOBS, initializer=_init) as pool:
             for a, code in pool.imap_unordered(_inlprobe, funcs if INLINE_MAX else [f for f in funcs if f in INLINE_LIST], chunksize=64):
                 if code: inl[a] = code
         print(f"  [inline: {len(inl)} functions: {len(INLINE_LIST & set(inl))} of the {len(INLINE_LIST)} in INLINE_LIST"
               + (f", leaf functions <= {INLINE_MAX} instructions" if INLINE_MAX else "") + f"]  ({time.time()-t1:.0f}s)")
     defined=set(); refs=set(); traps=0; trunc=0; kinds=collections.Counter(); bytes_=0; jt_left=set()
-    with mp.Pool(mp.cpu_count(), initializer=_init, initargs=(inl,)) as pool:
+    with mp.Pool(JOBS, initializer=_init, initargs=(inl,)) as pool:
         for n,(idx,d,r,tp,tr,kk,sz,lf) in enumerate(pool.imap_unordered(_shard, chunks)):
             defined |= set(d); refs |= set(r); traps+=tp; trunc+=tr; jt_left |= set(lf)
             kinds.update(kk); bytes_+=sz

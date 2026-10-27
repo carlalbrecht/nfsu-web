@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Underground — recompilation development build</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui,sans-serif; background:#101217; color:#e8eaf0; }
+  body { max-width: 1000px; margin: 24px auto; padding: 0 20px; }
+  h1 { font-size: 24px; margin-bottom: 6px; }
+  p { color: #b9c0cd; }
+  button { font: inherit; padding: 10px 18px; margin: 0 8px 12px 0; cursor: pointer; }
+  canvas { display: block; width: min(100%,800px); height: auto; background: black; outline: none; }
+  pre { font: 12px ui-monospace,monospace; white-space: pre-wrap; max-height: 300px; overflow: auto; }
+</style>
+<h1>Need for Speed: Underground</h1>
+<p>Development build · stock game target</p>
+<button id="start">Start game</button><button id="stop" disabled>Stop</button>
+<span id="status" role="status">Ready</span>
+<canvas id="game" width="800" height="600" tabindex="0" aria-label="Game screen"></canvas>
+<p>Click the game to focus it. Use the original keyboard controls.</p>
+<details open><summary>Development log</summary><pre id="log"></pre></details>
+<script type="module" src="/stock.js"></script>
+</html>

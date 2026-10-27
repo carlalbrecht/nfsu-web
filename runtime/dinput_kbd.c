@@ -372,8 +372,8 @@ uint32_t dikbd_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
             n++;
             if (!(fl & DIGDD_PEEK)) d->events++;
             if (kbd_log() && !(fl & DIGDD_PEEK))
-                fprintf(stderr, "[dikbd] event %s key 0x%02x -> dwOfs %u%s app 0x%x\n",
-                        e.down ? "down" : "up  ", e.dik, ofs, d->fmt == FMT_RAW ? " (raw)" : "", app);
+                fprintf(stderr, "[dikbd] event %s key 0x%02x -> dwOfs %u%s app 0x%x return %08x\n",
+                        e.down ? "down" : "up  ", e.dik, ofs, d->fmt == FMT_RAW ? " (raw)" : "", app, c->eip);
         }
         if (!(fl & DIGDD_PEEK)) d->cursor = s;
         MR32(pn) = n;

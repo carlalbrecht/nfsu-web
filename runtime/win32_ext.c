@@ -1,6 +1,11 @@
 /* Win32 layer - second round: registry, window, synchronization, threads */
 #include <strings.h>
 #include "cpu.h"
+#ifdef NFSU1
+#define VIRTUAL_GAME_DIR "C:\\NFSU1"
+#else
+#define VIRTUAL_GAME_DIR "C:\\NFSU2"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -1126,6 +1131,11 @@ static int g_reg_loaded = 0;
 
 static const char *reg_path(void){
     static char pth[512];
+#ifdef NFSU1
+    const char *save = getenv("NFSU1_SAVEDIR");
+    snprintf(pth, sizeof pth, "%s/registry.txt", save ? save : "/save");
+    return pth;
+#endif
     /* NFSU2_REGFILE=<path>: lets test runs use their own registry file */
     const char *rf = getenv("NFSU2_REGFILE");
     if (rf && *rf){ snprintf(pth, sizeof pth, "%s", rf); return pth; }
@@ -1327,8 +1337,8 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
         else if (!strcasecmp(vn,"~MHz")){
             const char *e = getenv("NFSU2_TSC_MHZ"); dval = e && *e ? (uint32_t)strtoul(e,0,0) : 3000u; have_d=1; }
         else if (!strcasecmp(vn,"Language"))      sval=language_registry();   /* runtime/language.c */
-        else if (!strcasecmp(vn,"Install Dir"))   sval="C:\\NFSU2";
-        else if (!strcasecmp(vn,"CD Drive"))      sval="C:\\NFSU2";
+        else if (!strcasecmp(vn,"Install Dir"))   sval=VIRTUAL_GAME_DIR;
+        else if (!strcasecmp(vn,"CD Drive"))      sval=VIRTUAL_GAME_DIR;
         else if (!strcasecmp(vn,"StreamingInstall")){ dval=0; have_d=1; }
         else if (!strcasecmp(vn,"VERSION"))       sval="1.2.0.0";
         else if (!strcasecmp(vn,"SIZE")){ dval=0; have_d=1; }
@@ -1719,7 +1729,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
     else if (!strcmp(n,"GetLogicalDrives")) r=0x0000000Cu;             /* C: and D: */
     else if (!strcmp(n,"GetDriveTypeA")) r=3;                          /* DRIVE_FIXED */
     else if (!strcmp(n,"GetCurrentDirectoryA")){
-        uint32_t p=A(c,1); const char*s="C:\\NFSU2"; uint32_t l=(uint32_t)strlen(s);
+        uint32_t p=A(c,1); const char*s=VIRTUAL_GAME_DIR; uint32_t l=(uint32_t)strlen(s);
         if(p){ mem_commit(p,l+1); memcpy(g_mem+p,s,l); MR8(p+l)=0; } r=l; }
     else if (!strcmp(n,"SetCurrentDirectoryA")) r=1;
     else if (!strcmp(n,"GetLongPathNameA")||!strcmp(n,"GetShortPathNameA")){

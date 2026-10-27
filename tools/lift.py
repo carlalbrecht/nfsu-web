@@ -1752,9 +1752,21 @@ class Lifter:
         out=[]; targets=set()
         body=[]
         x87opt = _os.environ.get('X87OPT','') == '1'
+        # Guest code can poll a flag without making a host call. The host's
+        # cooperative thread lock must still allow the producer to run.
+        schedule_points = {entry} if _os.environ.get('SCHEDULE') == '1' else set()
+        if schedule_points:
+            for instructions in blocks.values():
+                for instruction in instructions:
+                    if instruction.mnemonic.startswith(('j', 'loop')):
+                        for operand in instruction.operands:
+                            if operand.type == X86_OP_IMM and operand.imm <= instruction.address:
+                                schedule_points.add(operand.imm)
         xb = X87Region()
         for ba in addrs:
             body.append(f"L_{ba:08x}:; /* --- block --- */")
+            if ba in schedule_points:
+                body.append("    { void guest_fair_yield(void); guest_fair_yield(); }")
             ins=blocks[ba]
             xb.reset()
             for k,i in enumerate(ins):

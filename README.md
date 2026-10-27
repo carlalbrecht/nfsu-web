@@ -1,74 +1,65 @@
-# Need for Speed: Underground 2 in the browser
+# Need for Speed: Underground — browser recompilation
 
-A fan project that runs the PC game *Need for Speed: Underground 2* (2004) in Google Chrome and Firefox. The game's
-x86 code is translated to C ahead of time and compiled to WebAssembly. Direct3D 9 runs on WebGPU and the sound on
-Web Audio. You bring your own copy of the game.
+An early port of the original PC **Need for Speed: Underground (2003)** to WebAssembly, based on [th0mk/nfsu2-web](https://github.com/th0mk/nfsu2-web). The first target is the stock game experience. Test-map access, surviving debug features, widescreen and multiplayer are later milestones.
 
-> Not affiliated with or endorsed by Electronic Arts. This repository contains none of the game's code or data.
+The current build translates a verified `Speed.exe` to C, compiles it to WASM, and runs it with the inherited Win32, Direct3D 9/WebGPU and DirectSound/Web Audio runtime. **This is a development port, not yet a validated playable release.** See [current validation and limitations](docs/port/status.md).
 
-![The start page: Play, the controls, your saves and Online](docs/web/start-page.png)
+Bring your own game installation. The repository excludes the executable, game assets, translated game C, built WASM, saves and local research output. The original installation is served read-only; browser saves use a separate origin-private storage directory.
 
-## What you need
+## Supported executable
 
-- **The game:** your own PC copy, patched to v1.2 (North America), with this exact `SPEED2.EXE` (other versions
-  will not work): 4,800,512 bytes, SHA-256 `f9dd86c054878ce6276beb07c1fd61874f7a1e4bf1f241b084c65b73e24168a7`.
-- **To build:** an Apple Silicon Mac (the tested setup) or Linux, Python 3, Node.js 20 or newer, Rust
-  ([rustup](https://rustup.rs)), and [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 for that system
-  unpacked into `deps/`. On Windows,
-  build in WSL 2 with the clone in the Linux file system (`~/nfsu2-web`): under `/mnt/c` it builds much slower.
-- **To play:** the latest Google Chrome, or Firefox where it has WebGPU (Windows, macOS).
+Only this exact executable is currently supported; generation and boot both verify its SHA-256:
 
-## Build
+- Name: `Speed.exe`
+- Size: **3,178,496 bytes**
+- SHA-256: `35654f401383be9af0dbff0d11a92220a17579a01030005de6943e63e03f460f`
 
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-web/gen.sh "/path/to/Need for Speed Underground 2/SPEED2.EXE"   # translate the game's code to C (into gen/)
-web/build.sh                                                    # compile it to out/web/nfsu2.wasm
-```
+The profile describes this binary, without assuming a retail region or patch label. Other executables require their own verified profile and validation.
 
-The generated C and the compiled module are made from the game, so they are never committed (`.gitignore`).
+## Build and run
 
-## Play
+Tested on an Apple Silicon Mac, Python 3.9+, Node.js 22 and wasi-sdk 34. Install the matching [wasi-sdk 34](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34) under `deps/`, or set `WASI` to its directory. The default is `deps/wasi-sdk-34.0-arm64-macos`.
 
 ```sh
-web/start.sh --data "/path/to/Need for Speed Underground 2"
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+npm --prefix web ci --ignore-scripts
+./gen.sh /path/to/game/Speed.exe
+./web/start.sh --data /path/to/game
 ```
 
-Open **http://localhost:8080/** in Chrome or Firefox and press **Play**. The start page has the settings, your saves
-and the controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md). The game plays in any of its
-thirteen languages, in Brazilian Portuguese, in Polish or in Turkish; the dubbed voices and movies and the Portuguese,
-Polish and Turkish text come from mods, as language packs ([docs/web/VPS.md](docs/web/VPS.md#languages)). The menus and
-HUD can be redrawn at four times their size, from a mod as a texture pack ([docs/web/VPS.md](docs/web/VPS.md#texture-packs)).
+Open `http://127.0.0.1:8080/` in Chrome and click **Start game**. Click the canvas to focus keyboard input. The server binds to loopback and supports the cross-origin-isolation headers required by shared WASM memory. `--no-build` reuses existing output; the normal command checks the generation stamp and rebuilds changed sources. Set `J=4` (the default) to bound compiler parallelism.
 
-To play with friends, run the server behind HTTPS, for example on a small VPS with Docker:
-[docs/web/VPS.md](docs/web/VPS.md).
-Everyone who plays from the same server can meet in free roam.
+For separate build steps:
 
-## How it works
+```sh
+./web/build.sh
+npm --prefix web run build
+./web/start.sh --data /path/to/game --no-build
+```
 
-- **`tools/`:** a Python lifter (Capstone) turns every function of `SPEED2.EXE` into C.
-- **`runtime/`:** Windows, Direct3D 9, DirectSound and DirectInput, reimplemented. `runtime/web/` holds the browser
-  parts.
-- **`web/src/`:** the page. It runs the game's threads as workers on one shared memory, draws with WebGPU and plays
-  sound through an AudioWorklet.
-- **`web/server-rs/`:** the server, in Rust: serves the page, the module and your game folder, and connects players
-  for multiplayer.
+For a headless native diagnostic, `./build.sh` creates `out/native/nfsu1_boot`; run `./run.sh /path/to/game/Speed.exe`. This diagnostic has no native display. Its save overlay is `out/save`, or `NFSU1_SAVEDIR` if supplied.
 
-More in [docs/web/DESIGN.md](docs/web/DESIGN.md). The same tree still builds the native macOS version
-(`./gen.sh`, `./build.sh && ./link.sh`, `./run.sh`).
+## Structure
 
-## Credits
+- `profiles/`: verified executable identity and code layout.
+- `tools/`: executable discovery, x86-to-C lifter and build driver.
+- `runtime/`: shared emulation; `runtime/nfsu1/` contains stock UG1 entry and compatibility code.
+- `runtime/web/`: browser graphics, audio, input and threading bridges.
+- `web/src/`: WASM workers and browser subsystems; `stock.ts` is the active launcher.
+- `tests/`: compiler/runtime tests, including synthetic UG1 port regressions.
+- `docs/port/`: current port notes and preserved upstream README.
 
-Based on Talha Müderrisoğlu's static recompilation of NFSU2 for Apple Silicon, which in turn follows the method of
-[N64: Recompiled](https://github.com/N64Recomp/N64Recomp) and [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
-The language packs are built from KyoriAsh's [Multi 13 languages mod](https://nfsmods.xyz/mod/5749) (with Lee-Ryo's
-Thai support, whose patch `runtime/language.c` follows), from TraduMix's and MixMods' Brazilian Portuguese
-translation (Fyro, Beater, Kerlyston F.; Junior_Djjr, SideWinder, Elyzandro), from PLProjekt's Polish translation
-(Daniel Graszka, MaDeR, Marcin Piech, Nati, Mateusz Wilkowski, alter), from VileStuff's
-[English Subtitles Fixed](https://nfsmods.xyz/mod/5286) and from muntazam's
-[Turkish translation](https://www.moddb.com/mods/need-for-speed-underground-2-turkish-translation-patch). The texture pack is built from LunicAura106's
-[Upscaled HUD](https://nfsmods.xyz/mod/4319). Built with the help of Claude Code.
+The imported tree also contains UG2-specific features, native packaging scripts and documentation. They are retained for provenance and later comparison, **not claimed as working UG1 features**. The build driver explicitly lists the runtime sources used by this port; UG2 guest hooks and overrides are disabled.
 
-## License
+## Checks
 
-MIT ([LICENSE](LICENSE)). *Need for Speed* and *Need for Speed: Underground 2* are trademarks of Electronic Arts Inc.
+```sh
+./tools/check.sh
+```
+
+## Upstream and licence
+
+The initial Git commit imports the MIT-licensed `th0mk/nfsu2-web` tree at `606ee3591e165b5aabadebd4e94f8d2de162b268`, with its existing structure and licence. Its README is preserved at [docs/port/upstream-readme.md](docs/port/upstream-readme.md). See [provenance and port design](docs/port/design.md) and [LICENSE](LICENSE).
+
+This fan project is not affiliated with Electronic Arts. No game content is supplied.

@@ -116,8 +116,12 @@ void dispatch_tail(struct CPU *c);
  * into the dispatcher.  Everything else (COM, Win32, server.dll, generated
  * code, misses, the addresses ICALL/EFXSTAT watch) takes dispatch_indirect /
  * dispatch_tail as before. */
+#ifdef NFSU1
+#include "game_profile.h"
+#else
 #define DISPATCH_TEXT_BASE 0x00401000u
 #define DISPATCH_TEXT_SIZE 0x00381af1u
+#endif
 typedef void (*guest_fn_t)(struct CPU *);
 extern guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];
 static inline guest_fn_t dispatch_fast(uint32_t a){

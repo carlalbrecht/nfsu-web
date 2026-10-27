@@ -323,7 +323,13 @@ static void label_put(int row, const char *txt){
 }
 static int g_cur_row = -1;             /* the game's active row (-1 = unknown) */
 static int g_row4_on = 1;              /* is the 4K row selectable (see modes_refresh) */
-static int modemap_on(void){ return !ENVC("NOWIDE"); }
+static int modemap_on(void){
+#ifdef NFSU1
+    return 0; /* Preserve the game's stock resolution rows and labels. */
+#else
+    return !ENVC("NOWIDE");
+#endif
+}
 /* The rows are derived from the VIEW's (window / full screen) aspect:
  * "1080p" = 1080 lines at the view's aspect.  So the drawable fills the
  * window without bars, and the resolution only changes the quality.  The
@@ -1146,7 +1152,7 @@ static uint32_t make_devinst(int keyboard){
     return p;
 }
 
-static void fill_caps(uint32_t p);
+void d3d9_fill_caps(uint32_t p);
 
 
 /* --- vertex processing: gather inputs per the declaration, run the shader --- */
@@ -2392,7 +2398,7 @@ int com_call(CPU *c, uint32_t magic){
                    MR32(p+1068) = gd && *gd ? (uint32_t)strtoul(gd,0,0) : 0x0040u;
                    MR32(p+1076) = 0xA1u; MR32(p+1096) = 1u; }
             r=0; }
-        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,3); if(pc) fill_caps(pc); r=0; }
+        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,3); if(pc) d3d9_fill_caps(pc); r=0; }
         else if (MID(CreateDevice)){
             if(!g_dev){ g_dev=com_new(IF_DEV,256); CH_FLAGS(g_dev) |= CF_DEVICE; }
             /* (this, Adapter, DeviceType, hFocusWindow, BehaviorFlags,
@@ -3007,7 +3013,7 @@ int com_call(CPU *c, uint32_t magic){
             r = atomic_load(&g_lost) ? 0x88760869u /* D3DERR_DEVICENOTRESET */ : 0u;
             if (r && g_tcl_lost_n++ < 4) fprintf(stderr,"com: TestCooperativeLevel -> DEVICENOTRESET\n"); }
         else if (MID(GetAvailableTextureMem)) r=256u*1024u*1024u;
-        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,1); if(pc) fill_caps(pc); r=0; }
+        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,1); if(pc) d3d9_fill_caps(pc); r=0; }
         else if (MID(GetDirect3D)){ uint32_t p=A(c,1); if(p) MR32(p)=g_d3d9; com_addref(g_d3d9); r=0; }
         else if (MID(GetDisplayMode)){
             /* Must be the CURRENT size; with a fixed 1280x720 the game's
@@ -3037,6 +3043,7 @@ int com_call(CPU *c, uint32_t magic){
             { extern void discord_on_present(void); discord_on_present(); }   /* Discord presence: samples, never blocks */
             texrep_frame();
             { extern void guest_cpu_mark(void); guest_cpu_mark(); }
+#ifndef NFSU1
             /* FETICK: the front-end tick [0x8651a8] should advance at 60 Hz, but
              * the game's frame-delta measurement always yields 1/1800 s, so the
              * tick never advances -> animations and timed screen transitions freeze.
@@ -3253,6 +3260,7 @@ int com_call(CPU *c, uint32_t magic){
                   fprintf(stderr,"  [measure] frame %u: coverage reset, sampler started\n",
                           g_present_no); }
               }
+#endif
             g_present++;
             { void vclock_tick(void); vclock_tick(); }
             /* Game speed = real fps / 60, so throttle the frame to 60 Hz
@@ -3269,6 +3277,7 @@ int com_call(CPU *c, uint32_t magic){
             { extern int g_perflog; void perflog_guest_frame(void);
               if (g_perflog) perflog_guest_frame(); }
             { void mprot_rearm(void); mprot_rearm(); }
+#ifndef NFSU1
             /* The game's own slot pools: an exhausted one prints its name in
              * red on screen.  List 0x828538 (tail) -> +4 (previous) ... 0x828534. */
             if (ENVC("POOLS") && (g_present_no % 150) == 20){
@@ -3323,6 +3332,7 @@ int com_call(CPU *c, uint32_t magic){
                     }
                 }
             }
+#endif
             /* RESETAT=<frame>: cause a device loss at that frame (test) */
             { const char *ra = ENVC("RESETAT");   /* several frames, comma-separated */
               int hitr = 0;
@@ -4828,34 +4838,4 @@ void com_report(void){
                 g_if[bi].name, g_if[bi].m[bm].name, (unsigned long long)best);
         g_mstat[bi][bm]=0;
     }
-}
-
-static void fill_caps(uint32_t p){
-    mem_commit(p,0x150); memset(g_mem+p,0,0x150);
-    MR32(p+0x00)=1; MR32(p+0x08)=0x00020000; MR32(p+0x0C)=0x00000002;
-    MR32(p+0x10)=0x00000020; MR32(p+0x14)=0x80000001; MR32(p+0x18)=1;
-    MR32(p+0x1C)=0x001BBEF0; MR32(p+0x20)=0x0000033F; MR32(p+0x24)=0x0F730191;
-    MR32(p+0x28)=0x000000FF; MR32(p+0x2C)=0x00003FFF; MR32(p+0x30)=0x00003FFF;
-    MR32(p+0x34)=0x000000FF; MR32(p+0x38)=0x0008FFFF; MR32(p+0x3C)=0x0021EDA5;
-    MR32(p+0x40)=0x07030700; MR32(p+0x44)=0x07030700; MR32(p+0x48)=0x07030700;
-    MR32(p+0x4C)=0x0000003F; MR32(p+0x50)=0x0000003F; MR32(p+0x54)=0x0000001F;
-    MR32(p+0x58)=4096; MR32(p+0x5C)=4096; MR32(p+0x60)=256; MR32(p+0x64)=8192;
-    MR32(p+0x68)=4096; MR32(p+0x6C)=16;
-    MRF32(p+0x70)=1.0e10f; MRF32(p+0x74)=-32768.0f; MRF32(p+0x78)=-32768.0f;
-    MRF32(p+0x7C)=32768.0f; MRF32(p+0x80)=32768.0f; MRF32(p+0x84)=0.0f;
-    MR32(p+0x88)=0x000001FF; MR32(p+0x8C)=0x00100008; MR32(p+0x90)=0x03FFFFFF;
-    MR32(p+0x94)=8; MR32(p+0x98)=8; MR32(p+0x9C)=0x0000013B;
-    MR32(p+0xA0)=8; MR32(p+0xA4)=6; MR32(p+0xA8)=4; MR32(p+0xAC)=8;
-    MRF32(p+0xB0)=256.0f; MR32(p+0xB4)=1048575; MR32(p+0xB8)=1048575;
-    MR32(p+0xBC)=16; MR32(p+0xC0)=508;
-    { /* Shader version settable from the environment (SM=0 -> fixed function) */
-      const char *sm = ENVC("D3D_SM");
-      uint32_t vs=0xFFFE0200u, ps=0xFFFF0200u;
-      if (sm){ int v=atoi(sm);
-        if (v==0){ vs=0; ps=0; }
-        else if (v==11){ vs=0xFFFE0101u; ps=0xFFFF0101u; }
-        else if (v==14){ vs=0xFFFE0101u; ps=0xFFFF0104u; }
-      }
-      MR32(p+0xC4)=vs; MR32(p+0xC8)=256; MR32(p+0xCC)=ps; }
-    MRF32(p+0xD0)=8.0f; MR32(p+0xD4)=0x00000051;
 }
