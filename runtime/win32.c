@@ -225,6 +225,7 @@ uint32_t win32_heap_live(void){ uint64_t l = 0; heap_totals(&l, 0, 0, 0); return
 /* --- tracing --- */
 typedef struct { uint32_t calls; uint32_t unimpl; } ImpStat;
 static ImpStat *stat_;
+void *win32_coverage_imports(void){ return stat_; }
 static uint32_t trace_n = 0, trace_max = 0;
 void win32_set_trace_max(uint32_t v){ trace_max = v; }
 static uint32_t unimpl_first = 0xffffffffu;

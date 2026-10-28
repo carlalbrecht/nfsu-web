@@ -17,7 +17,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("target", choices=("native", "web"))
     parser.add_argument("--jobs", type=int, default=int(os.environ.get("J", "4")))
+    parser.add_argument("--runtime-tests", action="store_true", help="link native runtime regression entry point")
     args = parser.parse_args()
+    if args.runtime_tests and args.target != "native": parser.error("--runtime-tests requires native")
     os.chdir(ROOT)
     stamp = Path("gen/all/stamp.txt")
     try:
@@ -32,6 +34,9 @@ def main():
     common = "mem dispatch genexec heap watchdog win32 win32_ext com d3dcaps debug res fileio vsemu lifecycle dinput_pad dikeys keyboard dinput_kbd winsock module modheap enhance"
     sources = [Path(f"runtime/{name}.c") for name in common.split()]
     sources += [Path(f"runtime/nfsu1/{name}.c") for name in ("entry", "stock", "win32", "datetime")]
+    if args.runtime_tests:
+        sources.remove(Path("runtime/nfsu1/entry.c"))
+        sources.append(Path("tests/nfsu1/runtime.c"))
     sources += [Path("runtime/web/null_platform.c"), Path("runtime/web/sha256.c")]
     sources += sorted(Path("gen/all").glob("*.c"))
     flags = shlex.split(os.environ.get("OPT", "-O1"))
@@ -42,13 +47,14 @@ def main():
         flags += ["--target=wasm32-wasip1-threads", "-pthread", "-msimd128", "-mbulk-memory", "-mnontrapping-fptoint", "-mtail-call", "-mexception-handling", "-mllvm", "-wasm-enable-sjlj", "-mllvm", "-wasm-use-legacy-eh=false", "-D_WASI_EMULATED_MMAN", "-D_WASI_EMULATED_SIGNAL", "-D_WASI_EMULATED_PROCESS_CLOCKS", "-fno-delete-null-pointer-checks", "-include", "runtime/web/compat/wasm_plat.h", "-Iruntime/web/compat"]
         sources += [Path(f"runtime/web/{name}.c") for name in ("tz", "thread_exit", "stackprobe", "net_lan", "shader_dump", "gpu_web", "audio_web", "input_web")]
         link_flags = ["-Wl,--import-memory,--export-memory,--shared-memory,--max-memory=4294967296", "-Wl,--initial-memory=1073741824,--global-base=671088640", "-Wl,-z,stack-size=16777216,--no-stack-first", "-lsetjmp", "-lwasi-emulated-mman", "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks"]
+        link_flags += [f"-Wl,-Map={out}/nfsu1.map"]
         binary = out / "nfsu1.wasm"
     else:
         cc = os.environ.get("CC", "clang")
         flags += ["-ffunction-sections", "-fdata-sections"]
         sources += [Path("runtime/net_vlan.c")]
         link_flags = ["-Wl,-dead_strip", "-lm", "-lpthread"]
-        binary = out / "nfsu1_boot"
+        binary = out / ("runtime_tests" if args.runtime_tests else "nfsu1_boot")
     headers = b"".join(p.read_bytes() for p in sorted(Path("runtime").rglob("*.h")))
     headers += b"".join(p.read_bytes() for p in sorted(Path("gen/all").glob("*.h")))
     headers += subprocess.check_output([cc, "--version"])
@@ -61,7 +67,12 @@ def main():
         if source.name == "thread_exit.c":
             index = local_flags.index("-include")
             del local_flags[index:index+2]
-        digest = hashlib.sha256(source.read_bytes() + header_hash + repr(local_flags).encode()).hexdigest()
+        includes = b""
+        if source == Path("runtime/vsemu.c"):
+            includes = b"".join(p.read_bytes() for p in sorted(Path("runtime/web").glob("vsemu_*.inc")))
+        elif source == Path("runtime/com.c"):
+            includes = Path("runtime/d3d_fvf.inc").read_bytes()
+        digest = hashlib.sha256(source.read_bytes() + includes + header_hash + repr(local_flags).encode()).hexdigest()
         if obj.exists() and key.exists() and key.read_text() == digest:
             return obj
         proc = subprocess.run([cc, *local_flags, "-c", str(source), "-o", str(obj)], capture_output=True, text=True)

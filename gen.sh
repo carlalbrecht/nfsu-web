@@ -13,7 +13,7 @@ cp out/analysis/game_profile.h gen/all/game_profile.h
 unset FLAGABI INLINE_LIST
 export OVERRIDE='' HOOKS='' FTOL2INL=0 INLINE=0
 export RELOCS=out/analysis/code-pointers.txt SEEDS=out/analysis/seeds.txt
-export J="${J:-4}" X87PC=1 JTSWITCH=1 SCHEDULE=1
+export J="${J:-4}" X87PC=1 JTSWITCH=1 SCHEDULE=1 COVERAGE=1
 "$PY" tools/genall.py "$EXE" "${NSHARD:-64}" > out/generation.log 2>&1 || { tail -40 out/generation.log; exit 1; }
 STRICT=1 "$PY" tools/argcount.py "$EXE" > out/argcount.log 2>&1 || { tail -10 out/argcount.log; exit 1; }
 "$PY" - "$EXE" <<'PY'
@@ -24,5 +24,6 @@ manifest={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in files}
 manifest['executable_sha256']=hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest()
 Path('gen/all/stamp.txt').write_text(json.dumps(manifest,indent=2)+'\n')
 PY
+"$PY" tools/coverage_manifest.py
 tail -18 out/generation.log
 echo 'Generated Underground 1 C sources in gen/all (not a boot validation).'

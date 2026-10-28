@@ -231,6 +231,9 @@ uint64_t g_com_calls=0, g_com_unimpl=0;
 #define MSTAT_IF 20
 #define MSTAT_M  128
 static uint64_t g_mstat[MSTAT_IF][MSTAT_M];
+void *com_coverage_methods(void){ return g_mstat; }
+void *com_coverage_created(void){ return g_com_new_n; }
+void *com_coverage_destroyed(void){ return g_com_del_n; }
 static uint64_t g_present=0, g_draw=0;
 static uint32_t g_d3d9=0, g_dev=0, g_cur_decl=0, g_cur_fvf=0, g_cur_tex=0;
 
@@ -920,6 +923,23 @@ static void ds_share(uint32_t data, int d){
     if (d > 0) for (int i = 0; i < 64; i++) if (!g_dsshare[i].data){ g_dsshare[i].data = data; g_dsshare[i].n = d; return; }
     /* table full / unknown block: keep it (a leak, never a use after free) */
 }
+/* Each DirectSound creation owns a separate set of buffers. The buffers do
+ * not keep the device alive: its final Release also destroys playing buffers.
+ * Device +4 is the list head; buffer +32/+36/+40 are owner/next/previous. */
+static void ds_attach(uint32_t device, uint32_t buffer){
+    uint32_t head = MR32(device + 4u);
+    MR32(buffer + 32u) = device; MR32(buffer + 36u) = head;
+    MR32(buffer + 40u) = 0;
+    if (head) MR32(head + 40u) = buffer;
+    MR32(device + 4u) = buffer;
+}
+static void ds_detach(uint32_t buffer){
+    uint32_t owner = MR32(buffer + 32u), next = MR32(buffer + 36u), prev = MR32(buffer + 40u);
+    if (prev) MR32(prev + 36u) = next;
+    else if (owner) MR32(owner + 4u) = next;
+    if (next) MR32(next + 40u) = prev;
+    MR32(buffer + 32u) = MR32(buffer + 36u) = MR32(buffer + 40u) = 0;
+}
 static void com_destroy(uint32_t o){
     uint32_t iface = CH_IFACE(o) & 0xFFFFu;
     switch (iface){
@@ -945,10 +965,13 @@ static void com_destroy(uint32_t o){
         break;
     case IF_STATEBLOCK: sb_destroy(o); break;
     case IF_QUERY: case IF_SWAPCHAIN: break;
+    case IF_DS:
+        while (MR32(o + 4u)) com_destroy(MR32(o + 4u));
+        break;
     case IF_DSBUF: {
-        /* the game silences buffers by releasing them (see Release); the
-         * mixer forgets the slot first, then the PCM block can go */
+        /* Unregister under the mixer's lock before releasing PCM memory. */
         void audio_unregister(int);
+        ds_detach(o);
         if (MR32(o + 28u)) audio_unregister((int)MR32(o + 28u));
         MR32(o + 28u) = 0;
         ds_share(MR32(o + 8u), -1);
@@ -1157,6 +1180,7 @@ void d3d9_fill_caps(uint32_t p);
 
 /* --- vertex processing: gather inputs per the declaration, run the shader --- */
 typedef struct { uint16_t off; uint8_t type; int8_t reg; } DElem;
+#include "d3d_fvf.inc"
 
 static int g_fixmat = -1;
 static uint64_t g_t_draw_ns = 0, g_v_xform = 0;
@@ -2339,22 +2363,7 @@ int com_call(CPU *c, uint32_t magic){
         } else r=0x80004002u;
     }
     else if (MID(AddRef))  r = com_addref(A(c,0));
-    else if (MID(Release)){
-        /* The game silences a sound buffer with Release, NOT with Stop
-         * (measured: in a 3-minute session Stop=0, Release=7).  Without stopping
-         * it, the menu music looped stale contents for the whole race and
-         * clashed with the race audio. */
-        /* State blocks give their slot back when destroyed (sb_destroy):
-         * the game creates and drops blocks all session long. */
-        if (iface==IF_DSBUF){
-            uint32_t self0=A(c,0);
-            if (self0 && mem_is_committed(self0+31) && MR32(self0+28)){
-                void audio_stop(int);
-                audio_stop((int)MR32(self0+28));
-                MR32(self0+12)=0;
-            }
-        }
-        r = com_release(A(c,0)); }
+    else if (MID(Release)) r = com_release(A(c,0));
     /* --- IDirect3D9 --- */
     else if (iface==IF_D3D9){
         if      (MID(GetAdapterCount))     r=1;
@@ -3475,7 +3484,8 @@ int com_call(CPU *c, uint32_t magic){
                 g_vsk.b[sr+k]=(int32_t)MR32(o);
             }
             r=0; }
-        else if (MID(SetVertexDeclaration)){ g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; r=0; }
+        else if (MID(SetVertexDeclaration)){
+            g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; g_cur_fvf=g_raw_fvf=0; r=0; }
         else if (MID(Reset)){
             /* (this, D3DPRESENT_PARAMETERS*)
              * The game resets the device when resolution/graphics detail changes.
@@ -3545,7 +3555,12 @@ int com_call(CPU *c, uint32_t magic){
                 g_ss_vb = 0; g_ib_obj = 0;
             }
             r=0; }
-        else if (MID(SetFVF)){ g_cur_fvf=A(c,1); g_raw_fvf=g_cur_fvf; r=0; }
+        else if (MID(SetFVF)){
+            uint32_t fvf=A(c,1), decl=fvf ? fvf_declaration(fvf) : 0;
+            if (!fvf) r=0;
+            else if (!decl) r=0x8876086cu;
+            else { g_cur_fvf=g_raw_fvf=fvf; g_cur_decl=g_raw_decl=decl; r=0; }
+        }
         else if (MID(CreateTexture)){
             /* (this,W,H,Levels,Usage,Format,Pool,ppTex,pShared) */
             uint32_t w=A(c,1), h=A(c,2), lev=A(c,3), usage=A(c,4), fmt=A(c,5), pool=A(c,6);
@@ -3627,22 +3642,6 @@ int com_call(CPU *c, uint32_t magic){
             }
             cube_mark(t2);                          /* CUBE TEXTURE record */
             if(pp) MR32(pp)=t2; r=0; }
-        else if (MID(GetCubeMapSurface)){
-            /* (this, FaceType, Level, ppCubeMapSurface) */
-            uint32_t self2=A(c,0), pp=A(c,3); uint32_t sf=tex_child(self2, A(c,1) < 6u ? A(c,1) : 0u, A(c,2), 1);
-            if (!sf){ if(pp) MR32(pp)=0; r=0x8007000Eu; goto cube_done; }
-            com_addref(self2);
-            MR32(sf+40)=2;
-            /* +44: FACE index + 1 (0 = not a cube surface).  SetRenderTarget
-             * packs this into the target field; otherwise all six faces are
-             * drawn on top of each other into the same texture. */
-            { uint32_t face = A(c,1); MR32(sf+44) = (face < 6u) ? face + 1u : 1u; }
-            if (self2 && mem_is_committed(self2+31)){
-                MR32(sf+4)=MR32(self2+4); MR32(sf+8)=MR32(self2+8);
-                MR32(sf+20)=MR32(self2+20); MR32(sf+28)=MR32(self2+28);
-            }
-            if(pp) MR32(pp)=sf; r=0;
-          cube_done:; }
         else if (MID(CreateVolumeTexture)){ uint32_t pp=A(c,8); if(pp) MR32(pp)=com_new(IF_TEX,160); r=0; }   /* same layout as 2D (child slots) */
         else if (MID(CreateVertexBuffer)){
             uint32_t pp=A(c,5); uint32_t b=com_new(IF_VB,64);
@@ -3999,6 +3998,11 @@ int com_call(CPU *c, uint32_t magic){
             if (!sf){ if(pp) MR32(pp)=0; r=0x8007000Eu; goto surf_done; }
             com_addref(self0);
             MR32(sf+40)=2;
+            /* The shared texture-vtable path handles GetCubeMapSurface.
+             * Preserve its face for SetRenderTarget: zero means a 2D surface,
+             * 1..6 mean cube faces. Without this every face overwrites +X,
+             * so reflections alternate between unrelated camera directions. */
+            MR32(sf+44)=cube3 ? face3+1u : 0u;
             uint32_t self=A(c,0);
             if (self && mem_is_committed(self+31)){
                 MR32(sf+4)=MR32(self+4); MR32(sf+8)=MR32(self+8);
@@ -4037,6 +4041,7 @@ int com_call(CPU *c, uint32_t magic){
         if      (MID(CreateSoundBuffer)){
             uint32_t desc=A(c,1), pp=A(c,2);
             uint32_t b=com_new(IF_DSBUF,64);
+            ds_attach(A(c,0), b);
             /* DSBUFFERDESC: dwSize@0 dwFlags@4 dwBufferBytes@8 dwReserved@12
              *               lpwfxFormat@16 guid3DAlgorithm@20
              * NOTE: the size used to be read from +12 (dwReserved) -> always
@@ -4116,6 +4121,7 @@ int com_call(CPU *c, uint32_t magic){
              * effects (engine, menu clicks) this way, so ALL of them were silent. */
             uint32_t src=A(c,1), pp=A(c,2);
             uint32_t b=com_new(IF_DSBUF,64);
+            ds_attach(A(c,0), b);
             if (src && mem_is_committed(src+31)){
                 MR32(b+4)=MR32(src+4);          /* size    */
                 MR32(b+8)=MR32(src+8);          /* data    */
@@ -4485,6 +4491,12 @@ int com_call(CPU *c, uint32_t magic){
                     memcpy(g_mem+p, tmpm, 16);
                     g_dikey_calls++;
                 }
+#ifdef NFSU1
+                if (dkind == 2u && (cb == 16u || cb == 20u) && metal_available()) {
+                    void nfsu1_mouse_state(unsigned char *);
+                    nfsu1_mouse_state(g_mem+p);
+                }
+#endif
             }
             r=0; }
         else if (MID(GetDeviceData)){                     /* the game polls the mouse state */
@@ -4612,13 +4624,11 @@ int com_call(CPU *c, uint32_t magic){
     return 1;
 }
 
-static uint32_t g_ds = 0;
 /* DirectSoundCreate(lpGuid, ppDS, pUnkOuter) */
 uint32_t com_directsoundcreate(uint32_t ppDS){
-    if (!g_ds){ g_ds = com_new(IF_DS, 64); CH_FLAGS(g_ds) |= CF_DEVICE;
-        fprintf(stderr,"com: IDirectSound object 0x%08x\n", g_ds); }
-    else com_addref(g_ds);                  /* every create hands out a reference */
-    if (ppDS) MR32(ppDS) = g_ds;
+    uint32_t device = com_new(IF_DS, 64);
+    fprintf(stderr,"com: IDirectSound object 0x%08x\n", device);
+    if (ppDS) MR32(ppDS) = device;
     return 0;
 }
 

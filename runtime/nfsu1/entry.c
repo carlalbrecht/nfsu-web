@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __wasm__
+#include "web/host_abi.h"
+#endif
 
 extern jmp_buf g_exit_jmp;
 extern int g_exit_code, g_exit_armed;
@@ -58,6 +61,19 @@ int main(int argc, char **argv) {
     fileio_set_write_root(save ? save : "/save");
     fileio_set_readonly_root(1);
     dispatch_init(); win32_init();
+#ifdef __wasm__
+    if (g_cov && g_bcov){
+        void *com_coverage_methods(void), *com_coverage_created(void), *com_coverage_destroyed(void), *win32_coverage_imports(void);
+        static uint32_t coverage[9];
+        coverage[0] = 1; coverage[1] = DISPATCH_TEXT_BASE; coverage[2] = DISPATCH_TEXT_SIZE;
+        coverage[3] = (uint32_t)(uintptr_t)g_cov; coverage[4] = (uint32_t)(uintptr_t)g_bcov;
+        coverage[5] = (uint32_t)(uintptr_t)win32_coverage_imports();
+        coverage[6] = (uint32_t)(uintptr_t)com_coverage_methods();
+        coverage[7] = (uint32_t)(uintptr_t)com_coverage_created();
+        coverage[8] = (uint32_t)(uintptr_t)com_coverage_destroyed();
+        nfsu2_register(HOST_KIND_COVERAGE, coverage, sizeof coverage);
+    }
+#endif
     { void com_set_trace(int); com_set_trace(getenv("COMTRACE") != NULL); }
 #ifdef __wasm__
     { void input_web_init(void); input_web_init(); }

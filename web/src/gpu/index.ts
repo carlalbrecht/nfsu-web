@@ -109,6 +109,8 @@ export interface Renderer {
   /** read the back buffer of the next encoded frame as PNG; with opts.artifacts it is also
    *  uploaded as <name>.png (an autotest dump falling on the same frame keeps its own name) */
   dump(name: string): Promise<Blob>;
+  /** One frame's draw state and translated shader sources, sampled under renderer ownership. */
+  inspect(): Promise<unknown>;
   /** distributions of the frames since the last call with reset (or since attach) */
   window(reset?: boolean): RendererWindow;
   /** each frame's time from its submit until the GPU had done it (onSubmittedWorkDone, so every
@@ -674,6 +676,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     },
     doneMs: () => { const d = done; done = []; return d; },
     dump: (name: string) => new Promise<Blob>(resolve => dumpWaiters.push({ name, resolve })),
+    inspect: () => new Promise((resolve,reject) => {
+      if (!alive || enc.inspectNext) { reject(Error('Renderer stopped or inspection already pending')); return; }
+      enc.inspectNext=resolve;
+    }),
     imageRect: () => imgRect ?? { x: 0, y: 0, w: canvas.width, h: canvas.height },
     flush: async () => {
       while (pending.size) await Promise.allSettled([...pending]);
@@ -682,6 +688,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     detach: () => {
       if (!alive) return;
       alive = false; cancelAnimationFrame(rafId); clearInterval(warmTimer); ro.disconnect();
+      enc.inspectNext?.({stopped:true}); enc.inspectNext=null;
       if (enc.warmDirty) try { localStorage.setItem(WARM_KEY, JSON.stringify(enc.warmEntries().slice(-4000))); } catch { /* full or off */ }
       // the game stops recording at its next present instead of waiting for a page
       // that is gone; a waiting present or a full resource queue wakes now

@@ -12,4 +12,7 @@ clang -O1 -Iruntime tests/nfsu1/win32.c runtime/nfsu1/win32.c runtime/nfsu1/date
 out/tests/win32
 clang -O1 -Iruntime tests/nfsu1/caps.c runtime/d3dcaps.c runtime/mem.c -lm -o out/tests/caps
 out/tests/caps
+mkdir -p out/tests/shaders
+clang -O1 -DVSEMU_WGSL -DNFS_ENHANCED=0 -Iruntime tests/nfsu1/shader.c runtime/vsemu.c -lm -o out/tests/shader
+out/tests/shader out/tests/shaders
 npm --prefix web run check

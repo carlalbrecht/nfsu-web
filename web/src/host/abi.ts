@@ -4,5 +4,5 @@
 //   audio: web/src/audio/index.ts  attachAudio(proc, opts)
 //   input: web/src/input/index.ts  attachInput(proc, element, opts)
 //   net:   web/src/net/index.ts    attachNet(proc, opts)   (free roam: Net, LAN play: Lan)
-export const enum HostKind { Gpu = 1, Audio = 2, Input = 3, Net = 4, Status = 5, Vsync = 6, Lan = 7 }
+export const enum HostKind { Gpu = 1, Audio = 2, Input = 3, Net = 4, Status = 5, Vsync = 6, Lan = 7, Coverage = 8 }
 export interface Registration { kind: HostKind; ptr: number; size: number }

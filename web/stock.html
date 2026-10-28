@@ -19,5 +19,14 @@
 <canvas id="game" width="800" height="600" tabindex="0" aria-label="Game screen"></canvas>
 <p>Click the game to focus it. Use the original keyboard controls.</p>
 <details open><summary>Development log</summary><pre id="log"></pre></details>
+<details><summary>Browser coverage</summary>
+<p id="coverage-status">Open <a href="/?test=1">coverage test mode</a> to record execution using separate test saves.</p>
+<button id="coverage-export">Export coverage report</button>
+<div id="test-runner" hidden>
+<label for="test-command">Scenario command (JSON)</label><br>
+<textarea id="test-command" rows="3" cols="70">{"action":"summary"}</textarea><br>
+<button id="test-run">Run test command</button><pre id="test-result" aria-live="polite"></pre>
+</div>
+</details>
 <script type="module" src="/stock.js"></script>
 </html>

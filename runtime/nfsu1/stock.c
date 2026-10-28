@@ -3,6 +3,28 @@
 #include "module.h"
 #include "widescreen.h"
 #include <stdio.h>
+#include <string.h>
+
+/* UG1 adds DIMOUSESTATE deltas directly to its 640x480 front-end cursor
+ * (4130d0 -> 70649c/7064a0; 4f6080 subtracts 320/240). Render pixels are
+ * therefore not mouse units. Rebase the browser's staged absolute position
+ * against that accumulator, so first clicks, clipped edges, resolution
+ * changes and returning from outside the canvas cannot leave an offset.
+ * Only the API result changes; the original game updates its own cursor. */
+void nfsu1_mouse_state(unsigned char *state) {
+    void metal_get_cursor(int *, int *), metal_game_size(unsigned *, unsigned *);
+    if (!mem_is_committed(0x7064a3u)) return;
+    unsigned w = 0, h = 0;
+    int x = 0, y = 0;
+    metal_game_size(&w, &h);
+    if (!w || !h) return;
+    metal_get_cursor(&x, &y);
+    int ux = (int)((int64_t)x * 640 / w), uy = (int)((int64_t)y * 480 / h);
+    if (ux < 0) ux = 0; else if (ux > 639) ux = 639;
+    if (uy < 0) uy = 0; else if (uy > 479) uy = 479;
+    uint32_t dx = (uint32_t)ux - MR32(0x70649cu), dy = (uint32_t)uy - MR32(0x7064a0u);
+    memcpy(state, &dx, 4); memcpy(state + 4, &dy, 4);
+}
 
 /* No additional guest DLL has been translated for this executable yet. */
 typedef struct { uint32_t iat; const char *dll, *name; int nargs; } ImpEnt;

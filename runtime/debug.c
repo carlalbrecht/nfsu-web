@@ -182,15 +182,21 @@ void guest_hook(CPU *c, uint32_t ip){
 
 
 /* ---- function coverage buffer ------------------------------------------ */
-#define COV_SIZE 3676913u
+#define COV_SIZE DISPATCH_TEXT_SIZE
 uint32_t *g_cov = 0;
+uint32_t *g_bcov = 0;
 uint32_t g_last_fn = 0;
 int      g_prof_on = 0;
 static void __attribute__((constructor)) _cov_init(void){
-    if (getenv("COVREPORT")){ g_cov = calloc(COV_SIZE, sizeof *g_cov); g_prof_on = 1; }
+    if (getenv("COVREPORT")){
+        g_cov = calloc(COV_SIZE, sizeof *g_cov);
+        g_bcov = calloc(COV_SIZE, sizeof *g_bcov);
+        g_prof_on = g_cov != NULL;
+    }
 }
 void cov_reset(void){
     if (g_cov) memset(g_cov, 0, (size_t)COV_SIZE * sizeof *g_cov);
+    if (g_bcov) memset(g_bcov, 0, (size_t)COV_SIZE * sizeof *g_bcov);
 }
 /* Plain dump (no top-30 list, counts kept): autotest "covdump". */
 void cov_dump(const char *path){

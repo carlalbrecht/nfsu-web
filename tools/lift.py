@@ -1765,6 +1765,8 @@ class Lifter:
         xb = X87Region()
         for ba in addrs:
             body.append(f"L_{ba:08x}:; /* --- block --- */")
+            if self.cov:
+                body.append(f"    cov_block(0x{ba:08x}u);")
             if ba in schedule_points:
                 body.append("    { void guest_fair_yield(void); guest_fair_yield(); }")
             ins=blocks[ba]
