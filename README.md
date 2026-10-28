@@ -2,7 +2,7 @@
 
 An early port of the original PC **Need for Speed: Underground (2003)** to WebAssembly, based on [th0mk/nfsu2-web](https://github.com/th0mk/nfsu2-web). The first target is the stock game experience. Test-map access, surviving debug features, widescreen and multiplayer are later milestones.
 
-The current build translates a verified `Speed.exe` to C, compiles it to WASM, and runs it with the inherited Win32, Direct3D 9/WebGPU and DirectSound/Web Audio runtime. It boots the original videos and menus, creates and reloads profiles, and runs a drivable Olympic Square circuit. **This is an early development port with limited gameplay validation.** See [current validation and limitations](docs/port/status.md).
+The current build translates a verified `Speed.exe` to C, compiles it to WASM, and runs it with the inherited Win32, Direct3D 9/WebGPU and DirectSound/Web Audio runtime. Browser checks cover original videos, saved profiles, early career progression, Circuit/Sprint driving, and natural Drag, Drift and Lap Knockout results. **This is an early development port; full game and Windows fidelity validation remain incomplete.** See [current validation and limitations](docs/port/status.md).
 
 Bring your own game installation. The repository excludes the executable, game assets, translated game C, built WASM, saves and local research output. The original installation is served read-only; browser saves use a separate origin-private storage directory.
 
@@ -59,6 +59,13 @@ The imported tree also contains UG2-specific features, native packaging scripts 
 ```sh
 ./tools/check.sh
 ```
+
+For instrumented browser play, open `/?test=1`. This records discovered-code
+execution and uses separate test saves. See [coverage commands, regression
+checks and evidence limits](docs/port/coverage.md) and the completed
+[browser stock-acceptance pass](docs/port/stock-acceptance.md). Stock game timing remains
+in use; detecting a high-refresh-rate display does not enable the inherited
+UG2 timing patches.
 
 ## Upstream and licence
 
