@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """x86-32 -> C lifter.  Translates a function into C that runs on the CPU state."""
-import sys, struct, collections
+import os, sys, struct, collections
 import pefile
 from split_reloc import operand as split_operand
 from capstone import *
@@ -372,7 +372,7 @@ class RawLifter:
     def __init__(self, data, base=0x00401000, comments=True):
         self.comments=comments; self.trap=False; self.traps=0
         self.trap_kinds=collections.Counter(); self.hooks=set(); self.watch=False
-        self.cov=False; self.retpast=set()
+        self.cov=False; self.retpast=set(); self.ug2_image=False
         self.secs=[('.text', base, len(data), bytes(data))]
         self.TVA=base; self.TSZ=len(data); self.TDATA=bytes(data)
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
@@ -391,7 +391,8 @@ class Lifter:
         self.TVA,self.TSZ,self.TDATA = next((va,vs,d) for nm,va,vs,d in self.secs if nm=='.text')
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
         # this module's callees from tools/retpast.txt (a call to one may not come back to the next instruction)
-        self.retpast={a for a in _retpast() if self.in_text(a)}
+        self.ug2_image = self.IB == 0x400000 and os.environ.get("NFS_TARGET") != "nfsu1"
+        self.retpast = {a for a in _retpast() if self.in_text(a)} if os.environ.get("NFS_TARGET") != "nfsu1" else set()
     def in_text(self,a): return self.TVA<=a<self.TVA+self.TSZ
 
     # ---------- operand -> C expression ----------
@@ -412,12 +413,12 @@ class Lifter:
             if m.index not in R32: raise Unsupported("index register")
             parts.append(f"c->{R32[m.index]}*{m.scale}" if m.scale!=1 else f"c->{R32[m.index]}")
         d = (m.disp + extra) & 0xffffffff
-        if d or not parts: parts.append(split_operand(d, getattr(self, 'cur_ip', 0)) if getattr(self, 'IB', 0) == 0x400000 else f"0x{d:x}u")
+        if d or not parts: parts.append(split_operand(d, getattr(self, 'cur_ip', 0)) if self.ug2_image else f"0x{d:x}u")
         return "(" + "+".join(parts) + ")"
 
     def rd(self, op):
         if op.type==X86_OP_IMM:
-            return split_operand(op.imm, getattr(self, 'cur_ip', 0), True) if getattr(self, 'IB', 0) == 0x400000 else f"0x{op.imm & 0xffffffff:x}u"
+            return split_operand(op.imm, getattr(self, 'cur_ip', 0), True) if self.ug2_image else f"0x{op.imm & 0xffffffff:x}u"
         if op.type==X86_OP_REG:
             r=op.reg
             if r in R32: return f"c->{R32[r]}"
@@ -1791,9 +1792,23 @@ class Lifter:
         out=[]; targets=set()
         body=[]
         x87opt = _os.environ.get('X87OPT','') == '1'
+        # Guest code can poll a flag without making a host call. The host's
+        # cooperative thread lock must still allow the producer to run.
+        schedule_points = {entry} if _os.environ.get('SCHEDULE') == '1' else set()
+        if schedule_points:
+            for instructions in blocks.values():
+                for instruction in instructions:
+                    if instruction.mnemonic.startswith(('j', 'loop')):
+                        for operand in instruction.operands:
+                            if operand.type == X86_OP_IMM and operand.imm <= instruction.address:
+                                schedule_points.add(operand.imm)
         xb = X87Region()
         for ba in addrs:
             body.append(f"L_{ba:08x}:; /* --- block --- */")
+            if self.cov:
+                body.append(f"    cov_block(0x{ba:08x}u);")
+            if ba in schedule_points:
+                body.append("    { void guest_fair_yield(void); guest_fair_yield(); }")
             ins=blocks[ba]
             xb.reset()
             for k,i in enumerate(ins):

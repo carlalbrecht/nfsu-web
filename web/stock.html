@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#071426">
+  <title>Game launcher · Need for Speed: Underground</title>
+  <link rel="stylesheet" href="/stock.css">
+</head>
+<body>
+<main id="launcher">
+  <header class="masthead">
+    <h1>Game launcher</h1>
+    <p>Need for Speed: Underground (2003)</p>
+  </header>
+  <div class="menu-bar"><h2>Session settings</h2><span id="status" role="status">Checking browser…</span></div>
+  <div class="setup">
+    <section class="options" aria-labelledby="display-title">
+      <h3 id="display-title">Display</h3>
+      <label class="setting" for="scaling"><span>Image scaling<small>Original 4:3 picture</small></span>
+        <select id="scaling"><option value="smooth">Smooth</option><option value="pixelated">Sharp pixels</option></select>
+      </label>
+      <label class="setting toggle" for="fullscreen"><span>Start in full screen<small>Fit the screen without stretching</small></span><input id="fullscreen" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+      <h3>Audio</h3>
+      <label class="setting" for="volume"><span>Master volume</span><output id="volume-value" for="volume">100%</output></label>
+      <input id="volume" type="range" min="0" max="100" step="5" value="100" aria-label="Master volume">
+      <label class="setting toggle" for="mute-hidden"><span>Mute in background</span><input id="mute-hidden" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+    </section>
+    <section class="controls" aria-labelledby="controls-title">
+      <h3 id="controls-title">Keyboard controls</h3>
+      <dl class="key-list">
+        <div><dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Drive / navigate</dd></div>
+        <div><dt><kbd>Enter</kbd></dt><dd>Select / skip intro</dd></div>
+        <div><dt><kbd>Backspace</kbd></dt><dd>Back in menus</dd></div>
+        <div><dt><kbd>Esc</kbd> / <kbd>Space</kbd></dt><dd>Pause / handbrake</dd></div>
+        <div><dt><kbd>F8</kbd></dt><dd>Show launcher controls</dd></div>
+      </dl>
+      <p class="control-note">Change driving keys, resolution and graphics detail in the game’s Options menu.</p>
+      <p class="save-note"><span class="save-symbol" aria-hidden="true">▣</span><span>Your profiles stay in this browser.<br><small>Use the game’s save option before stopping.</small></span></p>
+    </section>
+  </div>
+  <div class="launch-row">
+    <div><p id="launch-note">Single player · original game timing</p><p class="muted">Keyboard recommended · Chrome on desktop</p></div>
+    <button id="start" class="launch-button" disabled>Start game <span aria-hidden="true">→</span></button>
+  </div>
+  <p id="problem" role="alert" hidden></p>
+  <footer><span>Unofficial fan port · not affiliated with Electronic Arts</span><button id="diagnostics-toggle" aria-expanded="false" aria-controls="diagnostics">Diagnostics <span aria-hidden="true">+</span></button></footer>
+</main>
+<section id="stage" hidden aria-label="Game">
+  <canvas id="game" width="800" height="600" tabindex="0" aria-label="Game screen"></canvas>
+  <div id="loading" role="status"><p id="loading-status">Starting…</p><div class="loading-bar"></div></div>
+  <div id="game-toolbar" data-nfsu2-ui>
+    <span id="stage-note">F8 · show controls</span>
+    <button id="game-mute" aria-pressed="false">Mute</button>
+    <button id="game-fullscreen">Full screen</button>
+    <button id="game-diagnostics" aria-expanded="false" aria-controls="diagnostics">Diagnostics</button>
+    <button id="stop" disabled>Stop game</button>
+  </div>
+</section>
+<section id="diagnostics" hidden aria-label="Diagnostics" data-nfsu2-ui>
+  <details><summary>Development log</summary><pre id="log"></pre></details>
+  <details><summary>Browser coverage</summary>
+    <p id="coverage-status">Open <a href="/?test=1">coverage test mode</a> to record execution using separate test saves.</p>
+    <button id="coverage-export">Export coverage report</button>
+    <div id="test-runner" hidden>
+      <label for="test-command">Scenario command (JSON)</label><br>
+      <textarea id="test-command" rows="3">{"action":"summary"}</textarea><br>
+      <button id="test-run">Run test command</button><pre id="test-result" aria-live="polite"></pre>
+    </div>
+  </details>
+</section>
+<script type="module" src="/stock.js"></script>
+</body>
+</html>

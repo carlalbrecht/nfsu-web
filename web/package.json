@@ -7,6 +7,8 @@
   "scripts": {
     "start": "bash ./start.sh",
     "build": "node build.mjs",
+    "build:nfsu1": "node build-stock.mjs",
+    "start:nfsu1": "bash ../nfsu1/start.sh",
     "check": "tsc -p .",
     "test": "node tools/unit-tests.mjs",
     "test:fast": "node tools/unit-tests.mjs --fast"

@@ -46,6 +46,8 @@ export interface RendererOptions {
   gpuTiming?: boolean;
   /** keep canvas.width/height at the element's size in device pixels (the game resets its device to follow) */
   autoSize?: boolean;
+  /** UG1 reuses render targets across frames and issues multiple colour clears per pass. */
+  orderedClears?: boolean;
   /** false: at a render scale below 1 the canvas stays at the view's size and the picture is composited over it (the
    *  path before fitPicture; A/B and diagnostics) */
   cssScale?: boolean;
@@ -135,6 +137,8 @@ export interface Renderer {
   photoLook(look: PhotoLook): void;
   /** photo mode's still picture so far: frames in it and frames it will have (0: the camera moves; photo mode off) */
   photoProgress(): { n: number; target: number };
+  /** One frame's draw state and translated shader sources, sampled under renderer ownership. */
+  inspect(): Promise<unknown>;
   /** distributions of the frames since the last call with reset (or since attach) */
   window(reset?: boolean): RendererWindow;
   /** each frame's time from its submit until the GPU had done it (onSubmittedWorkDone, so every
@@ -251,7 +255,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       giveUp(new Error(`this game process ${was === P.DETACHED ? 'takes no renderer any more (one detached, or the game stopped waiting for one)' : 'already has a renderer'}: start a new game to show it again`));
   }
   let enc: Encoder;
-  try { enc = new Encoder(device, mem, reg.ptr, log); } catch (e) { giveUp(e); }
+  try { enc = new Encoder(device, mem, reg.ptr, log, opts.orderedClears); } catch (e) { giveUp(e); }
   enc.logShaders = !!opts.logShaders;
   enc.pointTex = !!opts.pixelated;
   if (enc.pointTex) log('[gpu] pixelated textures');
@@ -930,6 +934,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       return { n: pic.count, target };
     },
     imageRect:() => imgRect ?? { x: 0, y: 0, w: canvas.width, h: canvas.height },
+    inspect: () => new Promise((resolve,reject) => {
+      if (!alive || enc.inspectNext) { reject(Error('Renderer stopped or inspection already pending')); return; }
+      enc.inspectNext=resolve;
+    }),
     flush: async () => {
       while (pending.size) await Promise.allSettled([...pending]);
       if (enc.warmDirty) try { localStorage.setItem(WARM_KEY, JSON.stringify(enc.warmEntries().slice(-4000))); } catch { /* full or off */ }
@@ -937,6 +945,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     detach: () => {
       if (!alive) return;
       alive = false; cancelAnimationFrame(rafId); clearInterval(warmTimer); ro.disconnect();
+      enc.inspectNext?.({stopped:true}); enc.inspectNext=null;
       if (enc.warmDirty) try { localStorage.setItem(WARM_KEY, JSON.stringify(enc.warmEntries().slice(-4000))); } catch { /* full or off */ }
       // the game stops recording at its next present instead of waiting for a page
       // that is gone; a waiting present or a full resource queue wakes now

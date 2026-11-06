@@ -26,6 +26,11 @@
  * Module handles are base addresses.  The DLL's exports are cdecl, its
  * imports stdcall; nothing about calling conventions differs from the exe. */
 #include "cpu.h"
+#ifdef NFSU1
+#define VIRTUAL_GAME_DIR "C:\\NFSU1"
+#else
+#define VIRTUAL_GAME_DIR "C:\\NFSU2"
+#endif
 #include "module.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -296,7 +301,7 @@ uint32_t module_proc(uint32_t h, uint32_t nm, uint32_t *err){
 int module_file_name(uint32_t h, char *out, int n){
     GuestMod *m = by_handle(h);
     if (!m || !m->mapped) return 0;
-    snprintf(out, (size_t)n, "C:\\NFSU2\\%s", m->info->name);
+    snprintf(out, (size_t)n, VIRTUAL_GAME_DIR "\\%s", m->info->name);
     return 1;
 }
 

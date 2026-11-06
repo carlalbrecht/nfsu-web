@@ -5,8 +5,8 @@
 //
 // Semantics kept from the Mac port, on purpose (the reference screenshots come
 // from it):
-//   - the first pass of a target in a frame starts with a clear to the clear
-//     colour (alpha 1), later passes load; a colour Clear only matters there;
+//   - colour Clears execute in stream order, including repeated clears of one
+//     target; passes without a colour Clear preserve that target's contents;
 //   - Z clears are deferred to the next pass that binds the Z surface;
 //   - every Z surface is depth32float, created at the size of the first target
 //     it is used with (the implicit one follows the screen); a size mismatch
@@ -143,6 +143,8 @@ export class Encoder {
 
   /** guest frames whose records are logged in full (diagnostics), and "trace every dumped frame" */
   traceSeq = new Set<number>(); traceDumps = false; logShaders = false;
+  inspectNext: ((frame: unknown) => void) | null = null;
+  private shaderText = new Map<string,string>();
   /** diagnostics: log every create / upload / free of these texture ids */
   watchTex = new Set<number>();
   /** pixelated textures (the page's pixelated_textures, NFSU2_PIXELATED_TEXTURES): the game's own textures sampled
@@ -166,7 +168,7 @@ export class Encoder {
   calls = { pipe: 0, bg0: 0, bg1: 0, bg1New: 0, blend: 0, ix: 0, draw: 0, pass: 0, copy: 0 };
   private seenFmt = new Set<string>();
 
-  constructor(device: GPUDevice, memory: WebAssembly.Memory, ctlPtr: number, log: (s: string) => void) {
+  constructor(device: GPUDevice, memory: WebAssembly.Memory, ctlPtr: number, log: (s: string) => void, private readonly orderedClears = false) {
     this.device = device; this.queue = device.queue; this.memory = memory; this.ctlW = ctlPtr >>> 2; this.log = log;
     const f = device.features;
     this.feat = { bc: f.has('texture-compression-bc'), astc: f.has('texture-compression-astc'), swizzle: f.has('texture-component-swizzle'),
@@ -247,6 +249,7 @@ export class Encoder {
         case Op.PoolWrite: if (this.pool && a0 + a1 <= this.pool.size) this.queue.writeBuffer(this.pool, a0, this.u8.subarray(data, data + a1)); break;
         case Op.ShaderVs: case Op.ShaderPs: {
           const text = new TextDecoder().decode(this.u8.slice(data, data + Math.max(0, a1 - 1)));
+          this.shaderText.set(`${op === Op.ShaderVs ? 'vs' : 'ps'}_${a0}`,text);
           const mod = this.module(`${op === Op.ShaderVs ? 'vs' : 'ps'}_${a0}`, text);
           (op === Op.ShaderVs ? this.vsMods : this.psMods).set(a0, mod);
           if (this.logShaders) this.log(`[shader ${op === Op.ShaderVs ? 'vs' : 'ps'}_${a0}]\n${text}\n[/shader]`);
@@ -654,6 +657,42 @@ export class Encoder {
       if (this.bb) { this.destroyLater.push(this.bb); this.bb = null; this.bbView = null; }
     } else { this.ensureBackBuffer(bbW, bbH); this.screen = this.bb; this.screenView = this.bbView; }
     const seq = u32[fw + F.seq];
+    if (this.inspectNext) {
+      // Inspect while the renderer owns the frame, before the guest can reuse
+      // its shared arenas. This is a one-shot diagnostic, not per-frame logging.
+      const groups = new Map<string,{target:number;vs:number;ps:number;fog:number[];blend:number;draws:number;vertices:number}>();
+      const shaders: Record<string,string> = {};
+      const records: unknown[] = [];
+      for (let i=0;i<dn;i++) {
+        const w=drawsW+i*P.DRAW_WORDS;
+        if (u32[w+D.kind]!==Kind.Draw) continue;
+        const item={target:u32[w+D.target],vs:i32[w+D.vsid],ps:i32[w+D.ps],fog:Array.from(f32.subarray(w+D.fogv,w+D.fogv+4)),blend:u32[w+D.blend],draws:0,vertices:0};
+        const key=JSON.stringify(item), group=groups.get(key) ?? item;
+        group.draws++; group.vertices+=u32[w+D.count]; groups.set(key,group);
+        for (const id of [`vs_${item.vs}`,`ps_${item.ps}`]) {
+          const source=this.shaderText.get(id); if (source) shaders[id]=source;
+        }
+        const textures=[D.tex,D.tex1,D.tex2,D.tex3].map(offset=>{
+          const id=u32[w+offset], t=this.tex[id];
+          return {id,...(t ? {format:t.fmt,width:t.w,height:t.h,renderTarget:t.rt} : {})};
+        });
+        const vertices=[];
+        if (item.vs<=0) for (let v=0;v<Math.min(u32[w+D.count],6);v++) {
+          const start=(u32[fw+F.tv]>>>2)+(u32[w+D.first]+v)*28;
+          vertices.push(Array.from(f32.subarray(start,start+28)));
+        }
+        const kw=(u32[fw+F.k]+u32[w+D.koff])>>>2;
+        const rawStart=u32[fw+F.raw]+u32[w+D.rawoff];
+        const stride=u32[kw], count=u32[w+D.count], indexed=u32[w+D.ixIsz]!==0;
+        records.push({index:i,target:item.target,vs:item.vs,ps:item.ps,blend:item.blend,count,textures,
+          depth:u32[w+D.depth],cull:u32[w+D.cull],alphaRef:f32[w+D.aref],clip:u32[w+D.clip],blendColor:u32[w+D.bcol],
+          projection:Array.from(f32.subarray(w+D.proj,w+D.proj+4)),vertices,
+          ...(item.vs>0 ? {indexed,stride,constants:Array.from(f32.subarray(kw+4,kw+4+Math.min(u32[w+D.ksz]/4-4,40))),
+            c79:u32[w+D.ksz]>=16+81*16 ? Array.from(f32.subarray(kw+4+79*4,kw+4+81*4)) : [],
+            raw:indexed ? [] : Array.from(this.u8.subarray(rawStart,rawStart+Math.min(count,6)*stride))} : {})});
+      }
+      this.inspectNext({seq,records:dn,groups:Array.from(groups.values()),shaders,draws:records}); this.inspectNext=null;
+    }
     this.tr = this.traceSeq.has(seq) || (this.traceDumps && u32[fw + F.dump]) ? [] : null;
     const tr = this.tr;
     if (tr) tr.push(`[trace] frame ${seq}: ${dn} records, ${vn} tverts, raw ${rvn} B, consts ${kn} B, back buffer ${bbW}x${bbH}, clear ${u32[fw + F.clearArgb].toString(16)}`);
@@ -688,7 +727,7 @@ export class Encoder {
     let draws = 0, passes = 0, skipped = 0;
     const endPass = () => { if (pass) { pass.end(); pass = null; } };
 
-    const openPass = (target: number, zid: number): GPURenderPassEncoder | null => {
+    const openPass = (target: number, zid: number, colourClear?: number): GPURenderPassEncoder | null => {
       let view: GPUTextureView, w: number, h: number, key: number;
       if (!target) { view = this.screenView!; w = bbW; h = bbH; key = -1; passCube = -1; }
       else {
@@ -701,7 +740,6 @@ export class Encoder {
       vpNow[0] = 0; vpNow[1] = 0; vpNow[2] = w; vpNow[3] = h; vpNow[4] = 0; vpNow[5] = 1;
       scNow[0] = 0; scNow[1] = 0; scNow[2] = w; scNow[3] = h; cClip = 0; passCells = false;
       passKey = target ? (target & 0xFFFF) : -1;
-      const first = key === -1 ? !screenTouched : !touched.has(key);
       let zv: GPUTextureView | undefined, zclear = false, zval = 1;
       if (zid && zid < 64) {
         let z = this.zTex[zid];
@@ -715,19 +753,21 @@ export class Encoder {
         if (z) { zv = this.zView[zid]; if (this.zpend[zid]) { zclear = true; zval = this.zpendV[zid]; this.zpend[zid] = 0; } }
       }
       realZ = !!zv;
-      const c = clearArgb;
+      if (!this.orderedClears && (key === -1 ? !screenTouched : !touched.has(key))) colourClear = clearArgb;
+      const c = colourClear ?? 0;
       const ts = this.firstPassTs; this.firstPassTs = undefined;
       const p = enc.beginRenderPass({
         timestampWrites: ts,
-        colorAttachments: [{ view, loadOp: first ? 'clear' : 'load', storeOp: 'store',
-          clearValue: { r: ((c >>> 16) & 255) / 255, g: ((c >>> 8) & 255) / 255, b: (c & 255) / 255, a: 1 } }],
+        colorAttachments: [{ view, loadOp: colourClear !== undefined ? 'clear' : 'load', storeOp: 'store',
+          clearValue: { r: ((c >>> 16) & 255) / 255, g: ((c >>> 8) & 255) / 255, b: (c & 255) / 255,
+            a: this.orderedClears && target ? (c >>> 24) / 255 : 1 } }],
         depthStencilAttachment: zv
           ? { view: zv, depthLoadOp: zclear ? 'clear' : 'load', depthClearValue: zval, depthStoreOp: 'store' }
           : { view: this.depthView(0, w, h), depthLoadOp: 'clear', depthClearValue: 1, depthStoreOp: 'discard' },
       });
       if (key === -1) screenTouched = true; else touched.add(key);
       passes++; this.calls.pass++;
-      if (tr) tr.push(`  pass ${passes}: ${target ? `tex ${target & 0xFFFF}${(target >>> 16) ? ` face ${(target >>> 16) - 1}` : ''}` : 'SCREEN'} ${w}x${h} color ${first ? `clear ${c.toString(16)}` : 'load'}, z ${zv ? `zid ${zid} ${zclear ? `clear ${zval}` : 'load'}` : `none (zid ${zid})`}`);
+      if (tr) tr.push(`  pass ${passes}: ${target ? `tex ${target & 0xFFFF}${(target >>> 16) ? ` face ${(target >>> 16) - 1}` : ''}` : 'SCREEN'} ${w}x${h} color ${colourClear !== undefined ? `clear ${c.toString(16)}` : 'load'}, z ${zv ? `zid ${zid} ${zclear ? `clear ${zval}` : 'load'}` : `none (zid ${zid})`}`);
       cPipe = null; cSrc = -1; cK = -1; cP = -1; b1[0] = -1; cBcol = -1; cIx = ''; cH = -1;
       return p;
     };
@@ -779,6 +819,11 @@ export class Encoder {
           const z = f32[w + D.clrZ];
           this.zpend[zid] = 1; this.zpendV[zid] = z < 0 ? 0 : z > 1 ? 1 : z;
           if (pass && curZ === zid) { endPass(); curT = -1; }
+        }
+        if (this.orderedClears) {
+          endPass(); curT = target; curZ = zid;
+          pass = openPass(target, zid, fl & 1 ? u32[w + D.clrArgb] : undefined);
+          continue;
         }
       }
       const zsplit = zid !== curZ && !(pass && kind !== Kind.Clear && (depth & 3) === 0);
@@ -979,12 +1024,12 @@ export class Encoder {
     return t.tex.format === 'bgra8unorm' && !t.cube ? t.tex : this.snapshot(enc, id)?.tex ?? null;
   }
 
-  /** diagnostics: texture `id` (level 0, face 0) drawn into a new bgra8 texture of its size, or null */
-  snapshot(enc: GPUCommandEncoder, id: number): { tex: GPUTexture; info: string } | null {
+  /** diagnostics: texture `id` (level 0, selected cube face) drawn into a new bgra8 texture of its size, or null */
+  snapshot(enc: GPUCommandEncoder, id: number, face = 0): { tex: GPUTexture; info: string } | null {
     const t = this.tex[id];
     if (!t) return null;
     const out = this.device.createTexture({ size: [t.w, t.h], format: 'bgra8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
-    const v = t.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
+    const v = t.tex.createView({ dimension: '2d', baseArrayLayer: t.cube ? face : 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
     this.copyQuad(enc, v, out.createView(), 'bgra8unorm', this.nearest, undefined, true);
     this.destroyLater.push(out);
     return { tex: out, info: `${t.w}x${t.h} ${t.tex.format} fmt ${t.fmt} levels ${t.levels}${t.cube ? ' cube' : ''}${t.rt ? ' rt' : ''}` };

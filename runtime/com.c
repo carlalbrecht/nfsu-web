@@ -250,6 +250,9 @@ uint64_t g_com_calls=0, g_com_unimpl=0;
 #define MSTAT_IF 20
 #define MSTAT_M  128
 static uint64_t g_mstat[MSTAT_IF][MSTAT_M];
+void *com_coverage_methods(void){ return g_mstat; }
+void *com_coverage_created(void){ return g_com_new_n; }
+void *com_coverage_destroyed(void){ return g_com_del_n; }
 static uint64_t g_present=0, g_draw=0;
 static uint32_t g_d3d9=0, g_dev=0, g_cur_decl=0, g_cur_fvf=0, g_cur_tex=0;
 
@@ -342,7 +345,13 @@ static void label_put(int row, const char *txt){
 }
 static int g_cur_row = -1;             /* the game's active row (-1 = unknown) */
 static int g_row4_on = 1;              /* is the 4K row selectable (see modes_refresh) */
-static int modemap_on(void){ return !ENVC("NOWIDE"); }
+static int modemap_on(void){
+#ifdef NFSU1
+    return 0; /* Preserve the game's stock resolution rows and labels. */
+#else
+    return !ENVC("NOWIDE");
+#endif
+}
 /* The rows are derived from the VIEW's (window / full screen) aspect:
  * "1080p" = 1080 lines at the view's aspect.  So the drawable fills the
  * window without bars, and the resolution only changes the quality.  The
@@ -934,6 +943,23 @@ static void ds_share(uint32_t data, int d){
     if (d > 0) for (int i = 0; i < 64; i++) if (!g_dsshare[i].data){ g_dsshare[i].data = data; g_dsshare[i].n = d; return; }
     /* table full / unknown block: keep it (a leak, never a use after free) */
 }
+/* Each DirectSound creation owns a separate set of buffers. The buffers do
+ * not keep the device alive: its final Release also destroys playing buffers.
+ * Device +4 is the list head; buffer +32/+36/+40 are owner/next/previous. */
+static void ds_attach(uint32_t device, uint32_t buffer){
+    uint32_t head = MR32(device + 4u);
+    MR32(buffer + 32u) = device; MR32(buffer + 36u) = head;
+    MR32(buffer + 40u) = 0;
+    if (head) MR32(head + 40u) = buffer;
+    MR32(device + 4u) = buffer;
+}
+static void ds_detach(uint32_t buffer){
+    uint32_t owner = MR32(buffer + 32u), next = MR32(buffer + 36u), prev = MR32(buffer + 40u);
+    if (prev) MR32(prev + 36u) = next;
+    else if (owner) MR32(owner + 4u) = next;
+    if (next) MR32(next + 40u) = prev;
+    MR32(buffer + 32u) = MR32(buffer + 36u) = MR32(buffer + 40u) = 0;
+}
 static void com_destroy(uint32_t o){
     uint32_t iface = CH_IFACE(o) & 0xFFFFu;
     switch (iface){
@@ -959,10 +985,13 @@ static void com_destroy(uint32_t o){
         break;
     case IF_STATEBLOCK: sb_destroy(o); break;
     case IF_QUERY: case IF_SWAPCHAIN: break;
+    case IF_DS:
+        while (MR32(o + 4u)) com_destroy(MR32(o + 4u));
+        break;
     case IF_DSBUF: {
-        /* the game silences buffers by releasing them (see Release); the
-         * mixer forgets the slot first, then the PCM block can go */
+        /* Unregister under the mixer's lock before releasing PCM memory. */
         void audio_unregister(int);
+        ds_detach(o);
         if (MR32(o + 28u)) audio_unregister((int)MR32(o + 28u));
         MR32(o + 28u) = 0;
         ds_share(MR32(o + 8u), -1);
@@ -1166,11 +1195,12 @@ static uint32_t make_devinst(int keyboard){
     return p;
 }
 
-static void fill_caps(uint32_t p);
+void d3d9_fill_caps(uint32_t p);
 
 
 /* --- vertex processing: gather inputs per the declaration, run the shader --- */
 typedef struct { uint16_t off; uint8_t type; int8_t reg; } DElem;
+#include "d3d_fvf.inc"
 
 static int g_fixmat = -1;
 static uint64_t g_t_draw_ns = 0, g_v_xform = 0;
@@ -1322,6 +1352,15 @@ static void res_pick(uint32_t gw, uint32_t gh, uint32_t *dw, uint32_t *dh){
     *dw = gw; *dh = gh;
     /* The cursor must be in the space the game BELIEVES in, not on the drawable. */
     { void metal_set_game_size(unsigned,unsigned); metal_set_game_size(gw, gh); }
+#ifdef NFSU1
+    /* The stock port honors the game's selected resolution, including the
+     * 800x600 menu -> 640x480 race transition. Canvas size is presentation. */
+    g_cur_row = tbl_row(gw, gh);
+    g_req_w = g_req_h = 0; g_aspfix = 1.f;
+    ws_set_mapping(1.f);
+    { void metal_set_ui_aspect(float, float); metal_set_ui_aspect(1.f, 1.f); }
+    return;
+#endif
     if (!rdone){ rdone = 1; const char *e = ENVC("NFSRES");
         if (e && *e){ unsigned a = 0, b = 0;
             if (sscanf(e, "%ux%u", &a, &b) == 2 && a >= 640 && b >= 480
@@ -2344,22 +2383,7 @@ int com_call(CPU *c, uint32_t magic){
         } else r=0x80004002u;
     }
     else if (MID(AddRef))  r = com_addref(A(c,0));
-    else if (MID(Release)){
-        /* The game silences a sound buffer with Release, NOT with Stop
-         * (measured: in a 3-minute session Stop=0, Release=7).  Without stopping
-         * it, the menu music looped stale contents for the whole race and
-         * clashed with the race audio. */
-        /* State blocks give their slot back when destroyed (sb_destroy):
-         * the game creates and drops blocks all session long. */
-        if (iface==IF_DSBUF){
-            uint32_t self0=A(c,0);
-            if (self0 && mem_is_committed(self0+31) && MR32(self0+28)){
-                void audio_stop(int);
-                audio_stop((int)MR32(self0+28));
-                MR32(self0+12)=0;
-            }
-        }
-        r = com_release(A(c,0)); }
+    else if (MID(Release)) r = com_release(A(c,0));
     /* --- IDirect3D9 --- */
     else if (iface==IF_D3D9){
         if      (MID(GetAdapterCount))     r=1;
@@ -2412,7 +2436,7 @@ int com_call(CPU *c, uint32_t magic){
                    MR32(p+1068) = gd && *gd ? (uint32_t)strtoul(gd,0,0) : 0x0040u;
                    MR32(p+1076) = 0xA1u; MR32(p+1096) = 1u; }
             r=0; }
-        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,3); if(pc) fill_caps(pc); r=0; }
+        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,3); if(pc) d3d9_fill_caps(pc); r=0; }
         else if (MID(CreateDevice)){
             if(!g_dev){ g_dev=com_new(IF_DEV,256); CH_FLAGS(g_dev) |= CF_DEVICE; }
             /* (this, Adapter, DeviceType, hFocusWindow, BehaviorFlags,
@@ -3027,7 +3051,7 @@ int com_call(CPU *c, uint32_t magic){
             r = atomic_load(&g_lost) ? 0x88760869u /* D3DERR_DEVICENOTRESET */ : 0u;
             if (r && g_tcl_lost_n++ < 4) fprintf(stderr,"com: TestCooperativeLevel -> DEVICENOTRESET\n"); }
         else if (MID(GetAvailableTextureMem)) r=256u*1024u*1024u;
-        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,1); if(pc) fill_caps(pc); r=0; }
+        else if (MID(GetDeviceCaps)){ uint32_t pc=A(c,1); if(pc) d3d9_fill_caps(pc); r=0; }
         else if (MID(GetDirect3D)){ uint32_t p=A(c,1); if(p) MR32(p)=g_d3d9; com_addref(g_d3d9); r=0; }
         else if (MID(GetDisplayMode)){
             /* Must be the CURRENT size; with a fixed 1280x720 the game's
@@ -3057,6 +3081,7 @@ int com_call(CPU *c, uint32_t magic){
             { extern void discord_on_present(void); discord_on_present(); }   /* Discord presence: samples, never blocks */
             texrep_frame();
             { extern void guest_cpu_mark(void); guest_cpu_mark(); }
+        #ifndef NFSU1
             /* FETICK: the front-end tick [0x8651a8] should advance at 60 Hz, but
              * the game's frame-delta measurement always yields 1/1800 s, so the
              * tick never advances -> animations and timed screen transitions freeze.
@@ -3273,6 +3298,7 @@ int com_call(CPU *c, uint32_t magic){
                   fprintf(stderr,"  [measure] frame %u: coverage reset, sampler started\n",
                           g_present_no); }
               }
+        #endif
             g_present++;
             { void vclock_tick(void); vclock_tick(); }
             /* Game speed = real fps / 60, so throttle the frame to 60 Hz
@@ -3289,6 +3315,7 @@ int com_call(CPU *c, uint32_t magic){
             { extern int g_perflog; void perflog_guest_frame(void);
               if (g_perflog) perflog_guest_frame(); }
             { void mprot_rearm(void); mprot_rearm(); }
+#ifndef NFSU1
             /* the wait for the next frame's slot, before the game reads its input (framerate.c) */
             { void hfr_after_present(void); hfr_after_present(); }
             /* The game's own slot pools: an exhausted one prints its name in
@@ -3345,6 +3372,7 @@ int com_call(CPU *c, uint32_t magic){
                     }
                 }
             }
+        #endif
             /* RESETAT=<frame>: cause a device loss at that frame (test) */
             { const char *ra = ENVC("RESETAT");   /* several frames, comma-separated */
               int hitr = 0;
@@ -3508,7 +3536,8 @@ int com_call(CPU *c, uint32_t magic){
                 g_vsk.b[sr+k]=(int32_t)MR32(o);
             }
             r=0; }
-        else if (MID(SetVertexDeclaration)){ g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; r=0; }
+        else if (MID(SetVertexDeclaration)){
+            g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; g_cur_fvf=g_raw_fvf=0; r=0; }
         else if (MID(Reset)){
             /* (this, D3DPRESENT_PARAMETERS*)
              * The game resets the device when resolution/graphics detail changes.
@@ -3578,7 +3607,12 @@ int com_call(CPU *c, uint32_t magic){
                 g_ss_vb = 0; g_ib_obj = 0;
             }
             r=0; }
-        else if (MID(SetFVF)){ g_cur_fvf=A(c,1); g_raw_fvf=g_cur_fvf; r=0; }
+        else if (MID(SetFVF)){
+            uint32_t fvf=A(c,1), decl=fvf ? fvf_declaration(fvf) : 0;
+            if (!fvf) r=0;
+            else if (!decl) r=0x8876086cu;
+            else { g_cur_fvf=g_raw_fvf=fvf; g_cur_decl=g_raw_decl=decl; r=0; }
+        }
         else if (MID(CreateTexture)){
             /* (this,W,H,Levels,Usage,Format,Pool,ppTex,pShared) */
             uint32_t w=A(c,1), h=A(c,2), lev=A(c,3), usage=A(c,4), fmt=A(c,5), pool=A(c,6);
@@ -3660,22 +3694,6 @@ int com_call(CPU *c, uint32_t magic){
             }
             cube_mark(t2);                          /* CUBE TEXTURE record */
             if(pp) MR32(pp)=t2; r=0; }
-        else if (MID(GetCubeMapSurface)){
-            /* (this, FaceType, Level, ppCubeMapSurface) */
-            uint32_t self2=A(c,0), pp=A(c,3); uint32_t sf=tex_child(self2, A(c,1) < 6u ? A(c,1) : 0u, A(c,2), 1);
-            if (!sf){ if(pp) MR32(pp)=0; r=0x8007000Eu; goto cube_done; }
-            com_addref(self2);
-            MR32(sf+40)=2;
-            /* +44: FACE index + 1 (0 = not a cube surface).  SetRenderTarget
-             * packs this into the target field; otherwise all six faces are
-             * drawn on top of each other into the same texture. */
-            { uint32_t face = A(c,1); MR32(sf+44) = (face < 6u) ? face + 1u : 1u; }
-            if (self2 && mem_is_committed(self2+31)){
-                MR32(sf+4)=MR32(self2+4); MR32(sf+8)=MR32(self2+8);
-                MR32(sf+20)=MR32(self2+20); MR32(sf+28)=MR32(self2+28);
-            }
-            if(pp) MR32(pp)=sf; r=0;
-          cube_done:; }
         else if (MID(CreateVolumeTexture)){ uint32_t pp=A(c,8); if(pp) MR32(pp)=com_new(IF_TEX,160); r=0; }   /* same layout as 2D (child slots) */
         else if (MID(CreateVertexBuffer)){
             uint32_t pp=A(c,5); uint32_t b=com_new(IF_VB,64);
@@ -4079,6 +4097,7 @@ int com_call(CPU *c, uint32_t magic){
         if      (MID(CreateSoundBuffer)){
             uint32_t desc=A(c,1), pp=A(c,2);
             uint32_t b=com_new(IF_DSBUF,64);
+            ds_attach(A(c,0), b);
             /* DSBUFFERDESC: dwSize@0 dwFlags@4 dwBufferBytes@8 dwReserved@12
              *               lpwfxFormat@16 guid3DAlgorithm@20
              * NOTE: the size used to be read from +12 (dwReserved) -> always
@@ -4158,6 +4177,7 @@ int com_call(CPU *c, uint32_t magic){
              * effects (engine, menu clicks) this way, so ALL of them were silent. */
             uint32_t src=A(c,1), pp=A(c,2);
             uint32_t b=com_new(IF_DSBUF,64);
+            ds_attach(A(c,0), b);
             if (src && mem_is_committed(src+31)){
                 MR32(b+4)=MR32(src+4);          /* size    */
                 MR32(b+8)=MR32(src+8);          /* data    */
@@ -4528,6 +4548,12 @@ int com_call(CPU *c, uint32_t magic){
                     memcpy(g_mem+p, tmpm, 16);
                     g_dikey_calls++;
                 }
+#ifdef NFSU1
+                if (dkind == 2u && (cb == 16u || cb == 20u) && metal_available()) {
+                    void nfsu1_mouse_state(unsigned char *);
+                    nfsu1_mouse_state(g_mem+p);
+                }
+#endif
             }
             r=0; }
         else if (MID(GetDeviceData)){                     /* the game polls the mouse state */
@@ -4655,13 +4681,11 @@ int com_call(CPU *c, uint32_t magic){
     return 1;
 }
 
-static uint32_t g_ds = 0;
 /* DirectSoundCreate(lpGuid, ppDS, pUnkOuter) */
 uint32_t com_directsoundcreate(uint32_t ppDS){
-    if (!g_ds){ g_ds = com_new(IF_DS, 64); CH_FLAGS(g_ds) |= CF_DEVICE;
-        fprintf(stderr,"com: IDirectSound object 0x%08x\n", g_ds); }
-    else com_addref(g_ds);                  /* every create hands out a reference */
-    if (ppDS) MR32(ppDS) = g_ds;
+    uint32_t device = com_new(IF_DS, 64);
+    fprintf(stderr,"com: IDirectSound object 0x%08x\n", device);
+    if (ppDS) MR32(ppDS) = device;
     return 0;
 }
 
@@ -4890,34 +4914,4 @@ void com_report(void){
                 g_if[bi].name, g_if[bi].m[bm].name, (unsigned long long)best);
         g_mstat[bi][bm]=0;
     }
-}
-
-static void fill_caps(uint32_t p){
-    mem_commit(p,0x150); memset(g_mem+p,0,0x150);
-    MR32(p+0x00)=1; MR32(p+0x08)=0x00020000; MR32(p+0x0C)=0x00000002;
-    MR32(p+0x10)=0x00000020; MR32(p+0x14)=0x80000001; MR32(p+0x18)=1;
-    MR32(p+0x1C)=0x001BBEF0; MR32(p+0x20)=0x0000033F; MR32(p+0x24)=0x0F730191;
-    MR32(p+0x28)=0x000000FF; MR32(p+0x2C)=0x00003FFF; MR32(p+0x30)=0x00003FFF;
-    MR32(p+0x34)=0x000000FF; MR32(p+0x38)=0x0008FFFF; MR32(p+0x3C)=0x0021EDA5;
-    MR32(p+0x40)=0x07030700; MR32(p+0x44)=0x07030700; MR32(p+0x48)=0x07030700;
-    MR32(p+0x4C)=0x0000003F; MR32(p+0x50)=0x0000003F; MR32(p+0x54)=0x0000001F;
-    MR32(p+0x58)=4096; MR32(p+0x5C)=4096; MR32(p+0x60)=256; MR32(p+0x64)=8192;
-    MR32(p+0x68)=4096; MR32(p+0x6C)=16;
-    MRF32(p+0x70)=1.0e10f; MRF32(p+0x74)=-32768.0f; MRF32(p+0x78)=-32768.0f;
-    MRF32(p+0x7C)=32768.0f; MRF32(p+0x80)=32768.0f; MRF32(p+0x84)=0.0f;
-    MR32(p+0x88)=0x000001FF; MR32(p+0x8C)=0x00100008; MR32(p+0x90)=0x03FFFFFF;
-    MR32(p+0x94)=8; MR32(p+0x98)=8; MR32(p+0x9C)=0x0000013B;
-    MR32(p+0xA0)=8; MR32(p+0xA4)=6; MR32(p+0xA8)=4; MR32(p+0xAC)=8;
-    MRF32(p+0xB0)=256.0f; MR32(p+0xB4)=1048575; MR32(p+0xB8)=1048575;
-    MR32(p+0xBC)=16; MR32(p+0xC0)=508;
-    { /* Shader version settable from the environment (SM=0 -> fixed function) */
-      const char *sm = ENVC("D3D_SM");
-      uint32_t vs=0xFFFE0200u, ps=0xFFFF0200u;
-      if (sm){ int v=atoi(sm);
-        if (v==0){ vs=0; ps=0; }
-        else if (v==11){ vs=0xFFFE0101u; ps=0xFFFF0101u; }
-        else if (v==14){ vs=0xFFFE0101u; ps=0xFFFF0104u; }
-      }
-      MR32(p+0xC4)=vs; MR32(p+0xC8)=256; MR32(p+0xCC)=ps; }
-    MRF32(p+0xD0)=8.0f; MR32(p+0xD4)=0x00000051;
 }

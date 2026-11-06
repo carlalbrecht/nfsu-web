@@ -172,7 +172,11 @@ void dispatch_indirect(CPU *c, uint32_t addr){
     /* with EFXSTAT the effect methods are not in the table: their calls into
      * D3DX may change an effect (d3dx_hle.c, stage 9's epoch) */
     { extern uint32_t g_fx_epoch;
+#ifndef NFSU1
       if (addr - 0x650000u < 0x40000u && addr != 0x0066acd2u && addr != 0x0066ac17u && addr != 0x0065adcbu) g_fx_epoch++; }
+#else
+      (void)g_fx_epoch; }
+#endif
     uint32_t off = addr - TEXT_BASE;
     if (off < TEXT_SIZE){
         guest_fn f = g_dtab[off];
@@ -195,7 +199,13 @@ void dispatch_indirect(CPU *c, uint32_t addr){
      * safely (restores esp) and falls through to the diagnosis below. */
     { static int gx = -1;
       if (gx < 0){ const char *e = getenv("GENEXEC"); gx = (e && *e=='0') ? 0 : 1; }
-      if (gx && mem_is_committed(addr) && run_generated(c, addr)){
+      if (gx
+#ifdef NFSU1
+          /* Keep missing static targets fatal; only heap-generated x86
+           * belongs to the interpreter fallback. */
+          && addr >= 0x08000000u && addr < 0x28000000u
+#endif
+          && mem_is_committed(addr) && run_generated(c, addr)){
           g_stat_indirect_ok++; return;
       } }
 
@@ -224,10 +234,19 @@ void dispatch_indirect(CPU *c, uint32_t addr){
           } else fprintf(stderr, "      target NOT COMMITTED (not data, a garbage pointer)\n");
           guest_backtrace(c, 12);
       } }
+#ifdef NFSU1
+    fprintf(stderr, "NFSU1: unresolved guest target %08x\n", addr);
+    exit(4);
+#endif
     POP32(c->eip);            /* drop the return address, swallow the call */
 }
 
 void unsupported_insn(CPU *c, uint32_t addr, const char *mn){
+#ifdef NFSU1
+    fprintf(stderr, "NFSU1: unsupported instruction at %08x: %s\n", addr, mn);
+    guest_backtrace(c, 16);
+    exit(4);
+#endif
     (void)c; (void)mn;
     g_stat_unsupported++;
     { extern void autotest_note_trap(uint32_t, const char*); autotest_note_trap(addr, mn); }

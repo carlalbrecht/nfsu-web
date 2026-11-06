@@ -96,6 +96,13 @@ for (s,m),n in seg_sites.most_common(8): print(f"    {s}: {m:8s} {n}")
 
 # cross-check against known correct values
 KNOWN={
+ # Additional Win32/DirectInput imports in Underground 1 (stdcall words).
+ 'AdjustWindowRectEx':4,'CallNextHookEx':4,'CharUpperA':1,'DirectInputCreateA':4,
+ 'FormatMessageA':7,'GetConsoleMode':2,'GetDateFormatA':6,'GetKeyState':1,
+ 'GetLogicalDriveStringsA':2,'GetNumberOfConsoleInputEvents':2,'GetTimeFormatA':6,
+ 'GetVolumeInformationA':8,'PeekConsoleInputA':4,'ReadConsoleInputA':4,
+ 'RegisterClassA':1,'SendNotifyMessageA':4,'SetConsoleMode':2,'SetWindowsHookExA':4,
+ 'SystemParametersInfoA':4,'UnhookWindowsHookEx':1,'keybd_event':4,
  'GetVersion':0,'GetVersionExA':1,'GetVersionExW':1,'GetModuleHandleA':1,'GetModuleHandleW':1,
  'GetModuleFileNameA':3,'GetModuleFileNameW':3,'GetProcAddress':2,'LoadLibraryA':1,'LoadLibraryW':1,
  'FreeLibrary':1,'GetCommandLineA':0,'GetCommandLineW':0,'GetStartupInfoA':1,'GetStartupInfoW':1,

@@ -1,0 +1,13 @@
+{
+  "id": "underground1",
+  "title": "Need for Speed: Underground",
+  "executable": "Speed.exe",
+  "sha256": "35654f401383be9af0dbff0d11a92220a17579a01030005de6943e63e03f460f",
+  "size": 3178496,
+  "image_base": 4194304,
+  "entry_point": 6753461,
+  "text_base": 4198400,
+  "text_size": 2711207,
+  "overrides": [],
+  "hooks": []
+}

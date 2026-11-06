@@ -117,8 +117,12 @@ void dispatch_tail(struct CPU *c);
  * into the dispatcher.  Everything else (COM, Win32, server.dll, generated
  * code, misses, the addresses ICALL/EFXSTAT watch) takes dispatch_indirect /
  * dispatch_tail as before. */
+#ifdef NFSU1
+#include "game_profile.h"
+#else
 #define DISPATCH_TEXT_BASE 0x00401000u
 #define DISPATCH_TEXT_SIZE 0x00381af1u
+#endif
 typedef void (*guest_fn_t)(struct CPU *);
 extern guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];
 static inline guest_fn_t dispatch_fast(uint32_t a){
@@ -352,6 +356,7 @@ void itrace_dump(int n);
  * Goal: answer "which code NEVER runs?".  Shows the subsystem that does
  * not run directly instead of chasing symptoms.                        */
 extern uint32_t *g_cov;   /* CALL COUNT per function */
+extern uint32_t *g_bcov;  /* basic-block entry counts; optional */
 extern uint32_t g_last_fn;          /* for the sampler: the last function entered */
 extern int      g_prof_on;          /* 1 if SAMPLE / COVERAGE is on */
 /* CAUTION: g_last_fn used to be written UNCONDITIONALLY here.  That is a
@@ -360,9 +365,13 @@ extern int      g_prof_on;          /* 1 if SAMPLE / COVERAGE is on */
 static inline void cov_hit(uint32_t va){
     if (__builtin_expect(g_prof_on, 0)){
         g_last_fn = va;
-        if (g_cov && va >= 0x00401000u && va < 0x00401000u + (3676913u))
-            g_cov[va - 0x00401000u]++;
+        if (g_cov && va >= DISPATCH_TEXT_BASE && va - DISPATCH_TEXT_BASE < DISPATCH_TEXT_SIZE)
+            g_cov[va - DISPATCH_TEXT_BASE]++;
     }
+}
+static inline void cov_block(uint32_t va){
+    if (__builtin_expect(g_bcov != 0, 0) && va >= DISPATCH_TEXT_BASE && va - DISPATCH_TEXT_BASE < DISPATCH_TEXT_SIZE)
+        g_bcov[va - DISPATCH_TEXT_BASE]++;
 }
 void cov_report(const char *path);
 

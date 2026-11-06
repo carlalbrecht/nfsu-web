@@ -1,5 +1,7 @@
 # Need for Speed: Underground 2 in the browser
 
+This fork also runs the original **Need for Speed: Underground (2003)**. Follow the [Underground 1 build and launcher instructions](nfsu1/README.md) for that game. The commands below target Underground 2.
+
 A fan project that runs the PC game *Need for Speed: Underground 2* (2004) in Google Chrome and Firefox. The game's
 x86 code is translated to C ahead of time and compiled to WebAssembly. Direct3D 9 runs on WebGPU and the sound on
 Web Audio. You bring your own copy of the game.

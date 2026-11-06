@@ -114,6 +114,18 @@ void hfr_note_input_read(int pad);  /* framerate.c: input age */
 
 /* ---- configuration ---------------------------------------------------- */
 enum { MODE_OFF, MODE_ALWAYS, MODE_HOTPLUG };
+/* Device enumeration and DirectInput state are shared. Rescanning, front-end
+ * key synthesis, saved bindings and collision rumble use UG2 guest addresses. */
+#ifdef NFSU1
+enum { UG2_PAD_HOOKS = 0 };
+#else
+enum { UG2_PAD_HOOKS = 1 };
+#endif
+
+static void set_ug2_rescan(int value){
+    if (UG2_PAD_HOOKS && mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = value;
+}
+
 static int pad_mode(void){
     static int m = -1;
     if (m < 0){
@@ -328,10 +340,10 @@ int dipad_enum(CPU *c, uint32_t devtype, uint32_t cb, uint32_t ref, uint32_t fla
      * "Press a button" prompt, which only a pad button ends. */
     static int seen = 0;
     if (mode == MODE_HOTPLUG || !seen){
-        if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = mode == MODE_HOTPLUG || !s.connected;
+        set_ug2_rescan(mode == MODE_HOTPLUG || !s.connected);
         if (!s.connected) return 0;
     }
-    else if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = 0;   /* the rescan after a change of kind: done */
+    else set_ug2_rescan(0);   /* the rescan after a change of kind: done */
     seen = 1;
     g_kind = wheel;
     static uint32_t ddi = 0;
@@ -591,13 +603,16 @@ static void fill_state(uint8_t *buf, uint32_t size, Dev *d, const PadState *s){
         int32_t v = scale_axis(t, d, a);
         memcpy(st + k_axis_ofs[a], &v, 4);
     }
-    uint32_t showoff_pad(uint32_t b, uint32_t hold);   /* showoff.c: D-pad down (hold) held while the car stands */
-    uint32_t ch = dev_channel(d);
-    if (ch) ours_from(ch, s->wheel);
-    else ours_config();
-    uint32_t hold = k_ours[OUR_HOLD].idx >= 0 ? 1u << k_ours[OUR_HOLD].bit : 0u;
-    uint32_t b = MR32(0x850078u) == 4 || !hold || g_ours[OUR_HOLD] == PAD_THEIRS ? s->buttons : showoff_pad(s->buttons, hold);
-    b = lobby_pad(b, ch, s->wheel);
+    uint32_t ch = 0, b = s->buttons;
+    if (UG2_PAD_HOOKS){
+        uint32_t showoff_pad(uint32_t b, uint32_t hold);
+        ch = dev_channel(d);
+        if (ch) ours_from(ch, s->wheel);
+        else ours_config();
+        uint32_t hold = k_ours[OUR_HOLD].idx >= 0 ? 1u << k_ours[OUR_HOLD].bit : 0u;
+        if (MR32(0x850078u) != 4 && hold && g_ours[OUR_HOLD] != PAD_THEIRS) b = showoff_pad(b, hold);
+        b = lobby_pad(b, ch, s->wheel);
+    }
     uint32_t pov[4] = { pov_of(!!(b & 1u << PAD_DUP), !!(b & 1u << PAD_DDOWN),
                                !!(b & 1u << PAD_DLEFT), !!(b & 1u << PAD_DRIGHT)),
                         stick_pov(d, s->axis[PAD_AXIS_LX], s->axis[PAD_AXIS_LY]),
@@ -1077,7 +1092,7 @@ static void ff_mix(void){
             else { strong += a * 0.5; weak += a * 0.5; }
         } else if (e->kind == EF_CONST || e->kind == EF_RAMP) weak += a * 0.5;
     }
-    ff_jolt();
+    if (UG2_PAD_HOOKS) ff_jolt();
     strong += g_jolt; weak += g_jolt * 0.4f;
     if (g_ff_actoff){ strong = 0; weak = 0; }
     float s = strong > 1 ? 1.f : (float)strong, w = weak > 1 ? 1.f : (float)weak;
@@ -1254,11 +1269,11 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
          * about 0.3 s, which then finds the device of the new kind. */
         if (lost && d->rest >= 2){
             if (other && !d->gone){
-                if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = 1;
+                set_ug2_rescan(1);
                 fprintf(stderr, "[pad] %s drives the pad: the game's %s device makes way for a %s\n",
                         s.name, d->wheel ? "wheel" : "pad", s.wheel ? "wheel" : "pad");
             }
-            else if (!d->gone) keep_bindings(self, d->wheel);     /* unplugged: the next one of its kind gets them */
+            else if (UG2_PAD_HOOKS && !d->gone) keep_bindings(self, d->wheel);     /* unplugged: the next one of its kind gets them */
             d->gone = 1;
             return DIERR_INPUTLOST;
         }
@@ -1269,7 +1284,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
         if (lost) memset(&at, 0, sizeof at);
         fill_state(g_mem + p, cb, d, &at);
         ff_mix();
-        fe_keys(d, at.buttons);
+        if (UG2_PAD_HOOKS) fe_keys(d, at.buttons);
         if (pad_log() && s.buttons != d->last_btn){
             fprintf(stderr, "[pad] buttons 0x%04x  LX %+.2f LY %+.2f LT %.2f RT %.2f\n", s.buttons,
                     (double)s.axis[PAD_AXIS_LX], (double)s.axis[PAD_AXIS_LY],

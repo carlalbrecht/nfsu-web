@@ -13,9 +13,23 @@
 /deps
 node_modules
 /web/dist/
+/web/dist-nfsu1/
 /web/dist-dev/
 __pycache__/
 *.pyc
 *.o
 *.log
 .DS_Store
+
+# Local research, tool environments, user-owned game files.
+/work/
+/data/
+/Need for Speed Underground*/
+*.exe
+*.EXE
+*.dll
+*.DLL
+*.bun
+*.BUN
+*.lzc
+*.LZC

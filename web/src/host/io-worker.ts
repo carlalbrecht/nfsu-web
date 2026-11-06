@@ -517,7 +517,7 @@ function recover(): Promise<void> {
     if (cacheDir) {
       // the cache files open are of the folder that went: opened again in the new one, and kept again
       cacheFiles.clear(); cacheSeen.clear(); aheadDone.clear(); keeping = true; kept = 0;
-      try { cacheDir = await opfs.getDirectoryHandle(CACHE_DIR, { create: true }); } catch { cacheDir = null; }
+      try { cacheDir = await opfs.getDirectoryHandle(cfg.cacheDir ?? CACHE_DIR, { create: true }); } catch { cacheDir = null; }
     }
     const top = fds.get(4);
     if (top?.mount === 'save') top.dh = saveRoot;            // /save itself, as the game lists it
@@ -979,11 +979,11 @@ onmessage = async (e: MessageEvent<Init | { t: 'save-ready' }>) => {
       let rootLate = false;
       const opfs = await within(navigator.storage.getDirectory(), MEM_CALL_MS).catch(e => { rootLate = timedOut(e); return null; });
       saveRoot = await memorySaves(opfs, rootLate);
-      try { cacheDir = opfs && await within(opfs.getDirectoryHandle(CACHE_DIR, { create: true }), MEM_CALL_MS); } catch { cacheDir = null; }
+      try { cacheDir = opfs && await within(opfs.getDirectoryHandle(cfg.cacheDir ?? CACHE_DIR, { create: true }), MEM_CALL_MS); } catch { cacheDir = null; }
     } else {
       const opfs = await navigator.storage.getDirectory();
       saveRoot = await opfs.getDirectoryHandle(cfg.saveDir, { create: true });
-      try { cacheDir = await opfs.getDirectoryHandle(CACHE_DIR, { create: true }); } catch { cacheDir = null; }
+      try { cacheDir = await opfs.getDirectoryHandle(cfg.cacheDir ?? CACHE_DIR, { create: true }); } catch { cacheDir = null; }
     }
     await loadManifest();
     fds.set(3, { mount: 'data', kind: 'dir', path: '', pos: 0, append: false, node: dataRoot, preopen: '/data' });

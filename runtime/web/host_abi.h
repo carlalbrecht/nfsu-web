@@ -13,6 +13,7 @@ enum {
     HOST_KIND_STATUS = 5,   /* frame/fps/timing counters for the page overlay */
     HOST_KIND_VSYNC  = 6,   /* vsync clock the page fills from requestAnimationFrame */
     HOST_KIND_LAN    = 7,   /* LAN play's virtual-LAN rings (net_lan.c; layout net_proto.h) */
+    HOST_KIND_COVERAGE = 8, /* NFSU1 opt-in diagnostics: version, text bounds, counters */
 };
 /* imported from the page (web/src/host/game-worker.ts, module "nfsu2") */
 __attribute__((import_module("nfsu2"), import_name("register")))

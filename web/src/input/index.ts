@@ -103,6 +103,8 @@ export interface InputHandle {
   exitFullscreen(): Promise<void>;
   toggleFullscreen(): Promise<void>;
   releaseAll(): void;
+  /** Explicit lifecycle event for the development scenario runner. */
+  testFocus(on: boolean): void;
   /** everything, for test pages and logs */
   status(): InputStats;
   /** numbers only, for the app's detailed overlay */
@@ -503,6 +505,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       const k = CODES[code] ?? PAGE_CODES[code];
       if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0, down ? PAGE_KEY_CHARS[code] ?? [] : []);
     },
+    testFocus(on) { active = on; push(IEV_FOCUS, 0, 0, 0, [], on ? 1 : 0, IREASON_SCRIPT); },
     touchPad(t) { pads?.setTouch(t); },
     viewRoll(rad) { if (h && !detached) { f32[0] = rad; Atomics.store(h, IM_VIEW_ROLL, f32Bits[0]); } },
     menuScale(s, bar) { menu = bar ? s : -s; putMenu(); },

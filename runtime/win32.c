@@ -2,6 +2,13 @@
 #include <stdatomic.h>
 #include "enhance.h"
 #include "cpu.h"
+#ifdef NFSU1
+#define VIRTUAL_GAME_DIR "C:\\NFSU1"
+#define VIRTUAL_GAME_EXE "Speed.exe"
+#else
+#define VIRTUAL_GAME_DIR "C:\\NFSU2"
+#define VIRTUAL_GAME_EXE "SPEED2.EXE"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -48,6 +55,9 @@ uint32_t com_direct3dcreate9(void);
 uint32_t com_directinput8create(uint32_t);
 uint32_t com_directsoundcreate(uint32_t);
 void com_init(void);
+#ifdef NFSU1
+int nfsu1_win32(CPU *, const char *, uint32_t *);
+#endif
 int g_bt_on = 0;
 
 #define IMP_MAGIC 0xF0000000u
@@ -164,6 +174,9 @@ void vclock_tick(void){
  * twice (under the emulator, then lifted), so both see the same QPC/ms. */
 _Atomic uint64_t g_vclock_freeze = 0;
 uint64_t host_us(void){
+#ifdef NFSU1
+    return real_us(); /* Stock timers use elapsed host time, without UG2's frame clock. */
+#endif
     { uint64_t fz = atomic_load(&g_vclock_freeze); if (__builtin_expect(fz != 0, 0)) return fz; }
     uint64_t base = atomic_load(&g_vclock_base);
     uint64_t rb   = atomic_load(&g_real_base);
@@ -245,6 +258,7 @@ uint32_t win32_heap_live(void){ uint64_t l = 0; heap_totals(&l, 0, 0, 0); return
 /* --- tracing --- */
 typedef struct { uint32_t calls; uint32_t unimpl; } ImpStat;
 static ImpStat *stat_;
+void *win32_coverage_imports(void){ return stat_; }
 static uint32_t trace_n = 0, trace_max = 0;
 void win32_set_trace_max(uint32_t v){ trace_max = v; }
 static uint32_t unimpl_first = 0xffffffffu;
@@ -310,6 +324,9 @@ static void spin_report(void){
 }
 uint64_t spin_slept_us(void){ return g_spin_us; }   /* perflog: frame limiter sleep */
 static void qpc_spin_sleep(CPU *c){
+#ifdef NFSU1
+    return; /* This optimization recognizes an UG2-specific call site. */
+#endif
     if (MR32(c->esp + 0xcu) != 0x57eb69u) return;
     if (g_spin_margin < 0){ const char *e = getenv("SPINSLEEP"); g_spin_margin = e ? atoi(e) : 200;
                             if (g_spin_margin && ENVC("QPCWHO")) atexit(spin_report); }
@@ -644,7 +661,7 @@ int win32_call(CPU *c, uint32_t idx){
         { static uint32_t seen = 0; if (f < 32u && !(seen & (1u << f))){ seen |= 1u << f;
             fprintf(stderr,"[hle] IsProcessorFeaturePresent(%u) -> %u (from 0x%08x)\n", f, r, c->eip); } } }
     else if (!strcmp(n,"GetModuleFileNameA")){ uint32_t p=ARG(c,1),sz=ARG(c,2);
-        const char*s="C:\\\\NFSU2\\\\SPEED2.EXE"; char ms[300];
+        const char*s=VIRTUAL_GAME_DIR "\\" VIRTUAL_GAME_EXE; char ms[300];
         if (module_file_name(ARG(c,0), ms, sizeof ms)) s = ms;   /* server.dll: C:\NFSU2\server.dll */
         uint32_t l=(uint32_t)strlen(s);
         if(p&&sz){ if(l>=sz) l=sz-1; memcpy(g_mem+p,s,l); MR8(p+l)=0; } r=l; }
@@ -766,6 +783,7 @@ int win32_call(CPU *c, uint32_t idx){
         r = 1; }
     else if (!strcmp(n,"Direct3DCreate9")) r = com_direct3dcreate9();
     else if (!strcmp(n,"DirectInput8Create")) r = com_directinput8create(ARG(c,3));
+    else if (!strcmp(n,"DirectInputCreateA")) r = com_directinput8create(ARG(c,2));
     else if (!strcmp(n,"DirectSoundCreate") || (!strcmp(n,"#1") && !strcasecmp(e->dll,"DSOUND.dll")))
         r = com_directsoundcreate(ARG(c,1));
     else if (!strcmp(n,"SetConsoleCtrlHandler")) r = 1;
@@ -783,12 +801,19 @@ int win32_call(CPU *c, uint32_t idx){
     else if (!strcmp(n,"TerminateProcess")){ g_exit_code=(int)ARG(c,1);
         fprintf(stderr,"\n*** guest TerminateProcess(%u) - exiting\n",ARG(c,1));
         if(g_exit_armed) longjmp(g_exit_jmp,1); return -1; }
+#ifdef NFSU1
+    else if (nfsu1_win32(c, n, &r)) { /* additional APIs in Underground 1 */ }
+#endif
     else if (winsock_call(c, e->dll, n, &r)) { /* ws2_32, netapi32: winsock.c */ }
     else if (fileio_call(c, n, &r)) { /* file I/O */ }
     else if (win32_ext_call(c, n, &r)) { /* second-round layer */ }
     else { handled = 0; g_win32_unimpl++; stat_[idx].unimpl++;
            { extern void autotest_note_unimpl(const char*,const char*,uint32_t);
              autotest_note_unimpl(e->dll, n, c->eip); }
+#ifdef NFSU1
+           guest_backtrace(c, 16);
+           exit(3); /* Never mistake a silently skipped API for a working boot. */
+#endif
            if (unimpl_first==0xffffffffu){ unimpl_first=idx; unimpl_name=n; } }
 
     if (g_bt_on && (!strcmp(n,"GetModuleFileNameA")||!strcmp(n,"ExitProcess")||!strcmp(n,"RaiseException")))
@@ -822,7 +847,11 @@ void win32_init(void){
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
     tick0 = (uint64_t)ts.tv_sec*1000 + ts.tv_nsec/1000000;
     g_cmdline = gheap_alloc(1, 64, 1);
+#ifdef NFSU1
+    strcpy((char*)(g_mem+g_cmdline), "Speed.exe");
+#else
     strcpy((char*)(g_mem+g_cmdline), "SPEED2.EXE");
+#endif
     /* fill the IAT with magic addresses */
     for (uint32_t i=0;i<g_imp_count;i++) MR32(g_imp[i].iat) = IMP_MAGIC + i;
     com_init();
