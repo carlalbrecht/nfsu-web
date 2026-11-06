@@ -28,9 +28,11 @@ npm --prefix web ci --ignore-scripts
 ./web/start.sh --data /path/to/game
 ```
 
-Open `http://127.0.0.1:8080/` in Chrome and click **Start game**. Click the canvas to focus keyboard input. The server binds to loopback and supports the cross-origin-isolation headers required by shared WASM memory. `--no-build` reuses existing output; the normal command checks the generation stamp and rebuilds changed sources. Set `J=4` (the default) to bound compiler parallelism.
+Open `http://127.0.0.1:8080/` in Chrome. The launcher remembers image scaling, full-screen startup, master volume and background muting. Click **Start game** to play. **F8** or moving the pointer to the top reveals mute, full-screen, diagnostics and Stop controls. The original 4:3 picture fits the screen without stretching. You can change resolution, graphics detail and driving keys in the game's Options menu.
 
-The original controls apply: **Enter** advances menus and skips eligible startup videos, **arrow keys** navigate and drive, **Backspace** goes back in menus, and **Escape** pauses a race. Wait for each screen transition before confirming again. **Stop** terminates the game; saves remain in this browser's storage for this origin.
+The launcher uses original CSS graphics and embeds IBM Plex Sans Condensed in its stylesheet. Both italic weights are bundled locally with their SIL Open Font License. It identifies the game by name in plain text. The browser starts loading game content from your installation when you select **Start game**. The server binds to loopback and supports the cross-origin-isolation headers required by shared WASM memory. `--no-build` reuses existing output. The normal command checks the generation stamp and rebuilds changed sources. Set `J=4` (the default) to bound compiler parallelism.
+
+The original controls apply: **Enter** advances menus and skips eligible startup videos, **arrow keys** navigate and drive, **Backspace** goes back in menus, and **Escape** pauses a race. Wait for each screen transition before confirming again. Full-screen Escape handling depends on browser keyboard-lock support; without it Escape also leaves full screen, while the game continues in the page. **Stop game** terminates the game and returns to the launcher; use the game's save option first. Saved profiles remain in this browser's storage for this origin.
 
 For separate build steps:
 

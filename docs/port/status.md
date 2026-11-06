@@ -88,6 +88,23 @@ debug menu were disabled again, speed is 1, and the game is at the main menu.
 
 ## Local smoke-test procedure
 
+The launcher uses original CSS graphics, embedded IBM Plex Sans Condensed
+italics for menu text, and system fonts for instructions. Its 6 November
+2026 update removed the server's game-art extractor and the browser request
+for that artwork.
+
+During the 29 October 2026 launcher checks,
+full-screen launch, keyboard input, F8 controls, diagnostics during play,
+Stop/restart and windowed startup were checked in the Chromium in-app browser.
+Scaling and volume preferences survived reload. The 35% master setting reached
+an audio output gain of 0.35; the toolbar mute reached 0. Renderer sampling
+reported zero errors. The launcher fits a 1280x720 desktop view and stacks
+without horizontal overflow at a 390px viewport. It still recommends a desktop
+keyboard; this does not qualify mobile gameplay. A transient local server
+socket-buffer error interrupted one WASM transfer; the launcher displayed the
+failure and a subsequent retry started successfully. Local HTTP isolation
+regressions passed. The image-scaling setting controls browser presentation.
+
 1. Start the browser launcher, allow startup to settle, and press Enter with a short hold to skip each eligible movie. Wait for the title transition before pressing Enter again.
 2. Create a disposable profile by typing its name into the original profile field. Confirm that the main menu opens and no unimplemented import is logged.
 3. Stop, reload and start again. Load the saved profile.
